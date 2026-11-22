@@ -1,0 +1,59 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+# The PyPI name carries the namespace, as szsdlc's does; the import package and
+# the command are `szsdlc_ui_win95` and `szsdlc-ui-win95`.
+name = "zhaostephen-szsdlc-ui-win95"
+description = "A Windows 95-styled, trait-driven browser viewer for szsdlc projects, served by a small local backend."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { file = "LICENSE" }
+authors = [{ name = "Stephen Zhao" }]
+keywords = ["sdlc", "szsdlc", "viewer", "windows-95"]
+dynamic = ["version"]
+
+# The viewer reads every project through szsdlc itself, never a second loader.
+dependencies = [
+    "zhaostephen-szsdlc>=0.2.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+]
+
+[project.scripts]
+szsdlc-ui-win95 = "szsdlc_ui_win95.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/stephen-zhao/szsdlc-ui-win95"
+Tracker = "https://github.com/stephen-zhao/szsdlc-szsdlc"
+
+[tool.hatch.version]
+path = "src/szsdlc_ui_win95/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/szsdlc_ui_win95"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src/", "tests/", "README.md", "LICENSE", "AGENTS.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["szsdlc_ui_win95"]
+omit = ["*/szsdlc_ui_win95/__main__.py"]  # a two-line shim onto cli.main
+branch = true
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true
+skip_covered = true

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewer-token" content="">
+<title>szsdlc Viewer</title>
+<link rel="stylesheet" href="win95.css">
+</head>
+<body>
+<main id="desktop" aria-label="Desktop"></main>
+<nav id="taskbar" aria-label="Taskbar">
+  <button id="start" class="btn" type="button" aria-haspopup="menu" aria-expanded="false">Start</button>
+  <button id="switcher" class="btn" type="button" aria-haspopup="menu" aria-expanded="false" title="Switch project"></button>
+  <div id="tasks" role="toolbar" aria-label="Open windows"></div>
+  <div id="tray"><span id="tray-schema"></span><span class="clock" id="clock"></span></div>
+</nav>
+<noscript><p style="color:#fff;padding:16px">The szsdlc Viewer needs JavaScript.</p></noscript>
+<script src="vendor/marked.umd.js"></script>
+<script src="vendor/purify.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
