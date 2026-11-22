@@ -6,7 +6,15 @@ Work is tracked with szsdlc, in
 [szsdlc-szsdlc](https://github.com/stephen-zhao/szsdlc-szsdlc), which also holds
 szsdlc's own SDLC. `.claude/settings.json` points szsdlc's `git` backend there,
 so `szsdlc` commands run in this repository act on that store. The design is
-SPK-0005; follow-up work is under its epic. Follow the rules in szsdlc's own
+SPK-0005; follow-up work is under EPIC-0011.
+
+**Tracking changes go to szsdlc-szsdlc's `main` directly, never to a branch.**
+szsdlc allocates an id by scanning for the highest existing number, so two
+branches of the store each claim the next id independently, and merging them
+produces two entities with the same id. Rebase onto `main`, run
+`szsdlc validate`, and push to `main`.
+
+Follow the rules in szsdlc's own
 AGENTS.md: change status through the CLI, author a relation on one side only,
 and capture rather than discuss and forget.
 
