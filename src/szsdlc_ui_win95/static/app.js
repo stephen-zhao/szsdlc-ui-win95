@@ -257,8 +257,9 @@
       if (e.button !== 0 || e.target.closest('button')) return;
       const start = { x: e.clientX, y: e.clientY, l: el.offsetLeft, t: el.offsetTop, w: el.offsetWidth, h: el.offsetHeight };
       handle.setPointerCapture(e.pointerId);
+      dragging = true;  // a background redraw waits until the drag ends
       const mv = (ev) => move(ev.clientX - start.x, ev.clientY - start.y, start);
-      const up = () => { handle.removeEventListener('pointermove', mv); handle.removeEventListener('pointerup', up); };
+      const up = () => { dragging = false; handle.removeEventListener('pointermove', mv); handle.removeEventListener('pointerup', up); };
       handle.addEventListener('pointermove', mv); handle.addEventListener('pointerup', up);
       e.preventDefault();
     });
@@ -269,6 +270,7 @@
   function closeMenus() {
     if (!openMenuEl) return;
     openMenuEl.el.remove(); openMenuEl.anchor?.setAttribute('aria-expanded', 'false'); openMenuEl = null;
+    setTimeout(() => flushPending(), 0);  // a redraw that waited for the menu
   }
   function popMenu(anchor, items, opts = {}) {
     closeMenus();
@@ -583,7 +585,7 @@
     const bBack = tb('back', 'Back', () => goBack()), bFwd = tb('fwd', 'Forward', () => goFwd()), bUp = tb('up', 'Up one level', () => goUp());
     // A snapshot has nothing to refresh from, so it gets no button (as it gets no menu entry).
     const bRefresh = SNAP ? null : tb('refresh', 'Refresh (F5)', () => refreshProject());
-    if (bRefresh) { bRefresh.disabled = refreshing; w.refreshBtn = bRefresh; }
+    if (bRefresh) { bRefresh.disabled = scheduler ? scheduler.buttonDisabled() : false; w.refreshBtn = bRefresh; }
     const crumbs = h('div', { class: 'field crumbbar', role: 'navigation', 'aria-label': 'Address' });
     const search = h('input', { class: 'field', id: uid(), type: 'search', placeholder: 'Find in folder', 'aria-label': 'Find in this folder', style: { width: '140px', flex: 'none' } });
     const hideId = uid();
@@ -1507,6 +1509,9 @@
     const cur = store.get('theme') || 'system';
     w.body.append(h('fieldset', null, h('legend', null, 'Scheme'), THEMES.map(([v, label]) => h('label', { class: 'row', style: { padding: '2px 0' } },
       h('input', { type: 'radio', name: 'szv-theme', id: 'szv-theme-' + v, value: v, checked: v === cur || null, onchange: () => { store.set('theme', v); applyTheme(v); } }), label))),
+    SNAP ? null : h('fieldset', null, h('legend', null, 'Update automatically'), AUTO_REFRESH.map(([ms, label]) => h('label', { class: 'row', style: { padding: '2px 0' } },
+      h('input', { type: 'radio', name: 'szv-auto', id: 'szv-auto-' + ms, value: String(ms), checked: ms === autoRefreshMs() || null,
+        onchange: () => { store.set('autoRefresh', String(ms)); scheduler?.setInterval(ms); } }), label))),
     h('div', { class: 'row end' }, h('button', { class: 'btn default', type: 'button', onclick: () => w.close() }, 'OK')));
   }
   function openAbout() {
@@ -1647,6 +1652,9 @@
     setHash(null);
     store.set('project', pid);
     refreshProjectsWindow();
+    // Only the project on screen refreshes in the background, so one switched
+    // to is brought up to date on arrival (the first one was, by opening it).
+    if (booted) scheduler?.arrive();
     return S;
   }
   function projectMenuItems() {
@@ -1658,46 +1666,86 @@
   }
 
   // Refresh: take the latest from where the project is kept, then redraw every
-  // open window of it in place. Nothing is sent. Replacing unsent changes is
-  // asked first, because the copy is otherwise never touched while it holds them.
-  let refreshing = false;
-  // While one runs, every Refresh button is disabled, so a second click cannot queue another.
-  function setRefreshing(on) {
-    refreshing = on;
-    for (const w of WM.list) if (w.refreshBtn) w.refreshBtn.disabled = on;
+  // open window of it in place. Nothing is sent. When to refresh, and how a
+  // person's Refresh and the background one take turns, is refresh.js's job
+  // (the scheduler); this is what one refresh does.
+  //
+  // Replacing unsent changes is asked first, and only ever for a refresh a
+  // person asked for: a background refresh skips that project and says so in
+  // the status bar.
+  const AUTO_REFRESH = [[0, 'Off'], [30000, 'Every 30 seconds'], [60000, 'Every minute'], [300000, 'Every 5 minutes']];
+  function autoRefreshMs() {
+    const v = Number(store.get('autoRefresh'));
+    return AUTO_REFRESH.some(([ms]) => ms === v) && store.get('autoRefresh') !== null ? v : 60000;
   }
-  async function refreshProject(pid = S?.pid, replace = false) {
-    if (SNAP || !pid || refreshing) return;
-    setRefreshing(true);
+  function quietStatus(text) { const front = explorerFor(null); if (front) front.setStatus([text]); }
+
+  // A redraw waits while someone is in the middle of something: a menu open,
+  // typing in the find field, or a drag. It is applied as soon as that ends.
+  let dragging = false;
+  let pendingApply = null;
+  function busy() {
+    return !!openMenuEl || dragging || !!document.activeElement?.matches?.('.toolbar input[type="search"]');
+  }
+  function whenIdle(fn) { if (busy()) pendingApply = fn; else { pendingApply = null; fn(); } }
+  function flushPending() { if (pendingApply && !busy()) { const fn = pendingApply; pendingApply = null; fn(); } }
+  for (const ev of ['pointerup', 'focusout', 'keyup']) document.addEventListener(ev, () => setTimeout(flushPending, 0));
+
+  function applyRefresh(pid, ctx, message) {
+    if (!S || S.pid !== pid) return;  // switched away meanwhile: the new data is cached for later
+    S = ctx;
+    buildDesktop(); updateTray();
+    for (const w of WM.list) if (w.pid === pid && w.redraw) w.redraw();
+    if (message) quietStatus(message);
+    refreshProjectsWindow();
+  }
+
+  async function runRefresh(kind, { replace = false } = {}) {
+    const pid = S?.pid;
+    if (!pid) return { ok: true };
+    const manual = kind === 'manual';
     let result;
     try { result = await hub.refresh(pid, replace); } catch (err) {
-      setRefreshing(false);
       if (err.status === 409) {
-        return messageBox({ kind: 'warn', title: 'Refresh', text: [String(err.message), 'Refresh anyway to take the latest, or cancel and send your changes first.'],
-          buttons: [{ label: 'Refresh anyway', action: () => refreshProject(pid, true) }, { label: 'Cancel', default: true }] });
+        if (manual) {
+          messageBox({ kind: 'warn', title: 'Refresh', text: [String(err.message), 'Refresh anyway to take the latest, or cancel and send your changes first.'],
+            buttons: [{ label: 'Refresh anyway', action: () => scheduler.manual({ replace: true }) }, { label: 'Cancel', default: true }] });
+        } else {
+          quietStatus('Not refreshed: this copy has unsent changes');
+        }
+        return { ok: true };  // reachable; nothing to back off from
       }
-      return messageBox({ kind: 'error', title: 'Refresh', text: [String(err.message || err), err.fix ? `Fix: ${err.fix}` : null].filter(Boolean) });
+      if (manual) messageBox({ kind: 'error', title: 'Refresh', text: [String(err.message || err), err.fix ? `Fix: ${err.fix}` : null].filter(Boolean) });
+      else quietStatus(`Not refreshed: ${err.message || err}`);
+      return { ok: false };
     }
-    try {
+    PROJECTS = PROJECTS.map((p) => (p.id === pid ? result.project : p));
+    // A background refresh redraws only when something arrived; a manual one always re-reads.
+    if (manual || result.arrived) {
       CTX.delete(pid);
       const ctx = await loadProject(pid);
-      PROJECTS = PROJECTS.map((p) => (p.id === pid ? result.project : p));
-      if (S && S.pid === pid) {
-        S = ctx;
-        buildDesktop(); updateTray();
-        for (const w of WM.list) if (w.pid === pid && w.redraw) w.redraw();
-        const front = explorerFor(null);
-        if (front) front.setStatus([result.arrived ? 'Refreshed: changes arrived' : 'Refreshed: nothing new']);
-      }
-      refreshProjectsWindow();
-    } finally { setRefreshing(false); }
+      const message = manual ? (result.arrived ? 'Refreshed: changes arrived' : 'Refreshed: nothing new') : 'Updated: changes arrived';
+      if (manual) applyRefresh(pid, ctx, message); else whenIdle(() => applyRefresh(pid, ctx, message));
+    }
     if (result.replaced) {
       messageBox({ kind: 'warn', title: 'Refresh', text: ['Changes in this copy that differed from the latest were replaced.', result.note ? `szsdlc ${result.note}.` : null].filter(Boolean) });
     }
+    return { ok: true };
   }
+
+  function paintRefreshButtons() {
+    const off = scheduler ? scheduler.buttonDisabled() : false;
+    for (const w of WM.list) if (w.refreshBtn) w.refreshBtn.disabled = off;
+  }
+  const scheduler = SNAP ? null : window.SzRefresh.createScheduler({
+    run: runRefresh, interval: 0, onChange: paintRefreshButtons, onStatus: quietStatus,
+  });
+  // A person asked: the toolbar button, the menu or F5.
+  function refreshProject() { scheduler?.manual(); }
   document.addEventListener('keydown', (e) => {
     if (e.key === 'F5' && !SNAP && S) { e.preventDefault(); refreshProject(); }
   });
+  if (scheduler) document.addEventListener('visibilitychange', () => scheduler.setVisible(!document.hidden));
   function buildSwitcher() {
     const sw = document.getElementById('switcher');
     sw.addEventListener('click', (e) => {
@@ -1772,6 +1820,7 @@
   }
 
   // -------------------------------------------------------------------- boot
+  let booted = false;
   async function boot() {
     applyTheme(store.get('theme') || 'system');
     buildStart(); buildSwitcher(); clock();
@@ -1785,6 +1834,8 @@
     const pid = want.pid || (PROJECTS.some((p) => p.id === remembered) ? remembered : PROJECTS[0].id);
     if (!(await switchProject(pid, { quiet: !!want.id }))) return;
     store.set('project', pid);
+    booted = true;
+    if (scheduler) { scheduler.setVisible(!document.hidden); scheduler.setInterval(autoRefreshMs()); }
     const target = normId(want.id);
     if (target && S.byKey.has(target)) await openItem(target);
     else if (store.get('welcome') !== '0' && innerWidth > 640) openWelcome();

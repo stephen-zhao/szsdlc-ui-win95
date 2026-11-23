@@ -6,6 +6,7 @@ import threading
 
 import pytest
 
+from conftest import szsdlc
 from szsdlc_ui_win95.registry import Registry
 from szsdlc_ui_win95.server import make_server
 
@@ -132,3 +133,16 @@ def test_refresh_is_guarded_like_opening(served):
     assert call(served, "POST", "/api/p/proj/refresh", {},
                 {"X-Viewer-Token": token(served), "Origin": "http://evil.example"})[0] == 403
     assert call(served, "POST", "/api/p/nope/refresh", {}, {"X-Viewer-Token": token(served)})[0] == 404
+
+
+def test_a_refresh_that_changes_nothing_does_not_reload(project):
+    """Background refreshes run every minute, so a no-op must not re-read the store (WI-0056)."""
+    registry = Registry()
+    pid = registry.add(project)
+    p = registry.get(pid)
+    model = p.store_model
+    assert p.refresh_from_backend()["arrived"] is False
+    assert p.store_model is model
+    szsdlc(project, "new", "epic", "--title", "Edited on disk")  # a file changed: that is reloaded
+    p.refresh_from_backend()
+    assert p.store_model is not model and any(e.title == "Edited on disk" for e in p.store_model)

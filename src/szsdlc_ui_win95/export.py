@@ -39,6 +39,8 @@ def render(registry: Registry, *, fragment: bool = False) -> str:
         html = re.sub(r"(?is)<!doctype html>|</?html[^>]*>|</?head>|</?body>|<meta [^>]*>\s*", "", html)
     html = html.replace('<link rel="stylesheet" href="win95.css">', f"<style>\n{css}\n</style>")
     html = re.sub(r'<script src="vendor/[^"]+"></script>\s*', "", html)
+    # A snapshot has nothing to refresh from, so the scheduler is left out.
+    html = re.sub(r'<script src="refresh\.js"></script>\s*', "", html)
     return html.replace('<script src="app.js"></script>',
                         f"<script>{vendor}</script>\n<script>window.SZ_SNAPSHOT={data};</script>\n<script>{js}</script>")
 
