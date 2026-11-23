@@ -586,6 +586,10 @@
     // A snapshot has nothing to refresh from, so it gets no button (as it gets no menu entry).
     const bRefresh = SNAP ? null : tb('refresh', 'Refresh (F5)', () => refreshProject());
     if (bRefresh) { bRefresh.disabled = scheduler ? scheduler.buttonDisabled() : false; w.refreshBtn = bRefresh; }
+    // The other half of a split button, as in Grafana: how often to refresh by itself.
+    const bInterval = SNAP ? null : h('button', { class: 'tbtn interval', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false',
+      onclick: (e) => { e.stopPropagation(); if (openMenuEl?.anchor === bInterval) closeMenus(); else popMenu(bInterval, intervalMenu()); } });
+    if (bInterval) { w.intervalBtn = bInterval; paintInterval(bInterval); }
     const crumbs = h('div', { class: 'field crumbbar', role: 'navigation', 'aria-label': 'Address' });
     const search = h('input', { class: 'field', id: uid(), type: 'search', placeholder: 'Find in folder', 'aria-label': 'Find in this folder', style: { width: '140px', flex: 'none' } });
     const hideId = uid();
@@ -595,7 +599,7 @@
     const pane = h('div', { class: 'pane' });
     const split = h('div', { class: 'split' }, tree, splitter, pane);
     const foldersBtn = h('button', { class: 'tbtn only-phone', type: 'button', onclick: () => split.classList.toggle('show-tree') }, 'Folders');
-    w.body.append(h('div', { class: 'toolbar' }, bBack, bFwd, bUp, bRefresh, h('span', { class: 'tsep' }), crumbs, search,
+    w.body.append(h('div', { class: 'toolbar' }, bBack, bFwd, bUp, h('span', { class: 'split' }, bRefresh, bInterval), h('span', { class: 'tsep' }), crumbs, search,
       h('label', { class: 'tbtn check-tb', for: hideId, title: 'Hide closed items (any terminal status: done, dropped, …) everywhere in this window' }, hideBox, 'Hide closed'), foldersBtn), split);
 
     // The folders pane is resizable; its width is remembered per browser.
@@ -1509,9 +1513,6 @@
     const cur = store.get('theme') || 'system';
     w.body.append(h('fieldset', null, h('legend', null, 'Scheme'), THEMES.map(([v, label]) => h('label', { class: 'row', style: { padding: '2px 0' } },
       h('input', { type: 'radio', name: 'szv-theme', id: 'szv-theme-' + v, value: v, checked: v === cur || null, onchange: () => { store.set('theme', v); applyTheme(v); } }), label))),
-    SNAP ? null : h('fieldset', null, h('legend', null, 'Update automatically'), AUTO_REFRESH.map(([ms, label]) => h('label', { class: 'row', style: { padding: '2px 0' } },
-      h('input', { type: 'radio', name: 'szv-auto', id: 'szv-auto-' + ms, value: String(ms), checked: ms === autoRefreshMs() || null,
-        onchange: () => { store.set('autoRefresh', String(ms)); scheduler?.setInterval(ms); } }), label))),
     h('div', { class: 'row end' }, h('button', { class: 'btn default', type: 'button', onclick: () => w.close() }, 'OK')));
   }
   function openAbout() {
@@ -1677,6 +1678,26 @@
   function autoRefreshMs() {
     const v = Number(store.get('autoRefresh'));
     return AUTO_REFRESH.some(([ms]) => ms === v) && store.get('autoRefresh') !== null ? v : 60000;
+  }
+  // Set from the ▾ beside Refresh, the one place to set it. Per browser, and
+  // the same in every Explorer: choosing in one repaints them all.
+  const SHORT = { 30000: '30s', 60000: '1m', 300000: '5m' };
+  function intervalMenu() {
+    const cur = autoRefreshMs();
+    return [{ head: 'Refresh automatically' },
+      ...AUTO_REFRESH.map(([ms, label]) => ({ label: (ms === cur ? '● ' : '\u2003') + label, action: () => setAutoRefresh(ms) }))];
+  }
+  function paintInterval(btn) {
+    const ms = autoRefreshMs();
+    const what = ms ? AUTO_REFRESH.find(([v]) => v === ms)[1].toLowerCase() : 'off';
+    btn.title = `Refresh automatically: ${what}`;
+    btn.setAttribute('aria-label', btn.title);
+    btn.replaceChildren(...(ms ? [h('span', { class: 'ival' }, SHORT[ms])] : []), h('span', { class: 'caret', 'aria-hidden': 'true' }, '▾'));
+  }
+  function setAutoRefresh(ms) {
+    store.set('autoRefresh', String(ms));
+    scheduler?.setInterval(ms);
+    for (const w of WM.list) if (w.intervalBtn) paintInterval(w.intervalBtn);
   }
   function quietStatus(text) { const front = explorerFor(null); if (front) front.setStatus([text]); }
 

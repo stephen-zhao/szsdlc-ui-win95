@@ -202,6 +202,11 @@ a, .link { color: var(--link); text-decoration: underline; cursor: pointer; back
 .tbtn:active:not(:disabled), .tbtn[aria-pressed="true"] { box-shadow: var(--pressed); background: var(--face-hi); }
 .tbtn:disabled { color: var(--ink-dim); }
 .tbtn:disabled svg { opacity: .35; filter: grayscale(1); }
+/* Refresh and its interval ▾, one split button. */
+.split { display: inline-flex; }
+.tbtn.interval { padding: 0 3px; gap: 2px; min-width: 14px; justify-content: center; }
+.tbtn.interval .ival { font-size: 11px; }
+.tbtn.interval .caret { font-size: 9px; }
 .tsep { width: 2px; align-self: stretch; margin: 2px 3px; box-shadow: inset 1px 0 var(--lo), inset -1px 0 var(--hi); }
 .seg { display: inline-flex; }
 .ellip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }

@@ -68,14 +68,30 @@ const { chromium } = require('playwright');
     await page.waitForSelector(`${W} .statusbar:has-text("Refreshed: nothing new")`);
     await page.waitForSelector(`${W} .toolbar button[title="Refresh (F5)"]:not([disabled])`);  // enabled again
   });
-  await step('update automatically is a display setting, and Off turns it off', async () => {
+  await step('the interval is set from the ▾ beside Refresh, the same in every Explorer', async () => {
+    const IV = `${W} .toolbar .tbtn.interval`;
+    if ((await page.textContent(IV)).trim() !== '1m▾') throw new Error(`default label is "${(await page.textContent(IV)).trim()}"`);
+    await page.click(IV);
+    if (!(await page.isVisible('.menu button:has-text("● Every minute")'))) throw new Error('the current interval is not marked');
+    await page.click('.menu button:has-text("Every 30 seconds")');
+    if ((await page.textContent(IV)).trim() !== '30s▾') throw new Error('label did not follow the choice');
+    // A second Explorer agrees.
+    await page.click(`${W} .menubar button:has-text("File")`);
+    await page.click('.menu button:has-text("New window")');
+    await page.waitForFunction(() => document.querySelectorAll('.toolbar .tbtn.interval').length >= 2);
+    const labels = await page.$$eval('.toolbar .tbtn.interval', (bs) => bs.map((b) => b.textContent.trim()));
+    if (!labels.every((l) => l === '30s▾')) throw new Error(`Explorers disagree: ${labels}`);
+    // Keyboard: Enter opens it, and Off turns it off.
+    await page.focus(IV);
+    await page.keyboard.press('Enter');
+    await page.click('.menu button:has-text("Off")');
+    if (await page.evaluate(() => localStorage.getItem('szv:autoRefresh')) !== '0') throw new Error('Off did not store 0');
+    const off = await page.$$eval('.toolbar .tbtn.interval', (bs) => bs.map((b) => b.textContent.trim()));
+    if (!off.every((l) => l === '▾')) throw new Error(`Off still shows a label: ${off}`);
+    // Display settings no longer has an interval.
     await page.click('#start');
     await page.click('.menu button:has-text("Display settings")');
-    await page.waitForSelector('.window.active legend:has-text("Update automatically")');
-    if (!(await page.isChecked('#szv-auto-60000'))) throw new Error('every minute is not the default');
-    await page.check('#szv-auto-0');
-    const stored = await page.evaluate(() => localStorage.getItem('szv:autoRefresh'));
-    if (stored !== '0') throw new Error(`Off stored ${stored}`);
+    if (await page.isVisible('.window.active legend:has-text("Update automatically")')) throw new Error('Display settings still sets the interval');
     await page.click('.window.active button:has-text("OK")');
   });
   await browser.close();
