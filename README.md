@@ -81,6 +81,19 @@ The frontend is plain HTML, CSS and JS in
 [`src/szsdlc_ui_win95/static/`](src/szsdlc_ui_win95/static/), with no build step;
 `marked` and `DOMPurify` are vendored with their licences.
 
+## Releasing
+
+The same scheme as the other stephen-zhao Python repositories:
+
+- Every push to `main` runs **Bump Version**. It bumps the part named by the
+  merged pull request's label (`bumpversion=major|minor|patch|none`; no label
+  means patch), commits `Bump version: X → Y` and tags `vY`.
+- That run triggers **Publish to PyPI**, which builds the one new tag, checks
+  that the tag, the tree's `current_version` and every artifact agree, publishes
+  through PyPI trusted publishing, and creates a GitHub pre-release.
+- To publish an existing tag by hand, run Publish with `workflow_dispatch` and
+  name the exact tag.
+
 ## Where the work is tracked
 
 This repository's SDLC lives in
