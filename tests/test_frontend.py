@@ -24,6 +24,12 @@ def test_app_names_no_entity_type():
     assert not sorted(set(literals) & set(DEFAULT_TYPES))
 
 
+def test_the_terminal_status_toggle_says_closed():
+    """It hides every terminal status, not only done (WI-0050); the saved key is kept."""
+    assert "'Hide closed'" in APP and "done hidden" not in APP and "not done.'" not in APP
+    assert "store.get('hideDone')" in APP
+
+
 def test_index_has_a_token_slot_and_loads_only_local_scripts():
     index = (STATIC / "index.html").read_text(encoding="utf-8")
     assert '<meta name="viewer-token" content="">' in index
