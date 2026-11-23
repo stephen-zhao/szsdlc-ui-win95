@@ -57,6 +57,7 @@
     meta: async () => SNAP.meta || {},
     projects: async () => SNAP.projects,
     open: async () => { throw new Error('A snapshot cannot open more projects.'); },
+    refresh: async () => { throw new Error('A snapshot cannot be refreshed.'); },
   } : {
     meta: () => get('meta'),
     projects: () => get('projects'),
@@ -65,6 +66,15 @@
         body: JSON.stringify({ location, code_root: codeRoot || null }) });
       const body = await r.json();
       if (!r.ok) { const e = new Error(body.detail || body.title || `HTTP ${r.status}`); e.fix = body.fix; throw e; }
+      return body;
+    },
+    // Take the latest from where the project is kept. Nothing is sent. A 409
+    // means unsent changes would be replaced; the caller asks, then sets replace.
+    async refresh(pid, replace = false) {
+      const r = await fetch('/api/p/' + encodeURIComponent(pid) + '/refresh', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Viewer-Token': TOKEN }, body: JSON.stringify({ replace }) });
+      const body = await r.json();
+      if (!r.ok) { const e = new Error(body.detail || body.title || `HTTP ${r.status}`); e.status = r.status; e.fix = body.fix; throw e; }
       return body;
     },
   };
@@ -551,6 +561,7 @@
         { label: 'View', items: () => [
           { label: 'Back', disabled: !back.length, action: goBack }, { label: 'Forward', disabled: !fwd.length, action: goFwd },
           { label: 'Up one level', disabled: !canUp(), action: goUp }, '-',
+          ...(SNAP ? [] : [{ label: 'Refresh (F5)', action: () => refreshProject() }]),
           { label: (w.hideClosed ? '● ' : ' ') + 'Hide closed', action: () => setHideClosed(!w.hideClosed) }, '-',
           { label: 'Roadmap', icon: 'calendar', action: () => navigate('roadmap') },
           ...S.schema.types.map((t) => ({ label: t.plural, icon: typeIcon(t), action: () => navigate('type:' + t.prefix) })),
@@ -796,6 +807,8 @@
     }
     search.addEventListener('input', drawPane);
     w.navigate = (n) => navigate(n);
+    // After a refresh: the project's data was reloaded, so draw again in place.
+    w.redraw = () => { drawTree(); drawPane(); };  // keeps each item's chosen tab
     navigate(node, { push: false });
     return w;
   }
@@ -1635,8 +1648,46 @@
     return [
       ...PROJECTS.map((p) => ({ label: `${p.id === S?.pid ? '● ' : ' '}${p.name}`, icon: 'computer', title: p.store, action: () => switchProject(p.id) })),
       SNAP ? null : { label: 'Open project…', icon: ['folder'], action: openProjectDialog },
+      SNAP || !S ? null : { label: `Refresh ${S.project.name} (F5)`, action: () => refreshProject() },
     ].filter(Boolean);
   }
+
+  // Refresh: take the latest from where the project is kept, then redraw every
+  // open window of it in place. Nothing is sent. Replacing unsent changes is
+  // asked first, because the copy is otherwise never touched while it holds them.
+  let refreshing = false;
+  async function refreshProject(pid = S?.pid, replace = false) {
+    if (SNAP || !pid || refreshing) return;
+    refreshing = true;
+    let result;
+    try { result = await hub.refresh(pid, replace); } catch (err) {
+      refreshing = false;
+      if (err.status === 409) {
+        return messageBox({ kind: 'warn', title: 'Refresh', text: [String(err.message), 'Refresh anyway to take the latest, or cancel and send your changes first.'],
+          buttons: [{ label: 'Refresh anyway', action: () => refreshProject(pid, true) }, { label: 'Cancel', default: true }] });
+      }
+      return messageBox({ kind: 'error', title: 'Refresh', text: [String(err.message || err), err.fix ? `Fix: ${err.fix}` : null].filter(Boolean) });
+    }
+    try {
+      CTX.delete(pid);
+      const ctx = await loadProject(pid);
+      PROJECTS = PROJECTS.map((p) => (p.id === pid ? result.project : p));
+      if (S && S.pid === pid) {
+        S = ctx;
+        buildDesktop(); updateTray();
+        for (const w of WM.list) if (w.pid === pid && w.redraw) w.redraw();
+        const front = explorerFor(null);
+        if (front) front.setStatus([result.arrived ? 'Refreshed: changes arrived' : 'Refreshed: nothing new']);
+      }
+      refreshProjectsWindow();
+    } finally { refreshing = false; }
+    if (result.replaced) {
+      messageBox({ kind: 'warn', title: 'Refresh', text: ['Changes in this copy that differed from the latest were replaced.', result.note ? `szsdlc ${result.note}.` : null].filter(Boolean) });
+    }
+  }
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'F5' && !SNAP && S) { e.preventDefault(); refreshProject(); }
+  });
   function buildSwitcher() {
     const sw = document.getElementById('switcher');
     sw.addEventListener('click', (e) => {

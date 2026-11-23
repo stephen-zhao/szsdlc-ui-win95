@@ -48,6 +48,12 @@ Opening a project it already has brings a clone up to date, but only when that
 clone has nothing unsent; otherwise the clone is shown as it is. Viewing never
 writes to a project.
 
+**Refresh** (View → Refresh, F5, or the taskbar's project menu) takes the latest
+from where the project is kept, through szsdlc's own `refresh`. It sends nothing
+and merges nothing, and every open window redraws in place. A project kept in a
+folder here is simply read again. If the copy holds changes that were never
+sent, Refresh asks before replacing them, and szsdlc keeps what it replaces.
+
 ## What it does
 
 - **One viewer, many projects.** A project button on the taskbar switches

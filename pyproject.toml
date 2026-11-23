@@ -16,7 +16,7 @@ dynamic = ["version"]
 
 # The viewer reads every project through szsdlc itself, never a second loader.
 dependencies = [
-    "zhaostephen-szsdlc>=0.2.6",
+    "zhaostephen-szsdlc>=0.2.11",
 ]
 
 [project.optional-dependencies]

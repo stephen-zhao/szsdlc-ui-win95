@@ -33,7 +33,9 @@ and capture rather than discuss and forget.
    project, such as a git URL) and goes through `locations.py`, which drives
    szsdlc's own backends: `resolve`/`from_settings`, then `ensure`, which may
    clone. Nothing else may create a store, and viewing never writes to one. A
-   clone is updated on open only when it has nothing unsent. Phase 2 writes must
+   clone is updated on open only when it has nothing unsent, and Refresh
+   replaces unsent state only after the person confirms, and only through
+   szsdlc's own `refresh`. Phase 2 writes must
    go through szsdlc's own operations, never a file write, so every gate still
    applies.
 6. **The backend is an implementation detail.** No UI names a backend or asks

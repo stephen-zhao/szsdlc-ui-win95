@@ -55,6 +55,14 @@ const { chromium } = require('playwright');
     await page.locator(`${W} .tree .node:visible`, { hasText: 'Roadmap' }).first().click();
     await page.waitForSelector(`${W} .board .bcol header b:has-text("Now")`);
   });
+  await step('refresh redraws in place', async () => {
+    await page.click(`${W} .menubar button:has-text("View")`);
+    await page.click('.menu button:has-text("Refresh")');
+    await page.waitForSelector(`${W} .statusbar:has-text("Refreshed: nothing new")`);
+    await page.waitForSelector(`${W} .board .bcol header b:has-text("Now")`);  // still where it was
+    await page.keyboard.press('F5');  // the shortcut refreshes too, without reloading the page
+    await page.waitForSelector(`${W} .statusbar:has-text("Refreshed: nothing new")`);
+  });
   await browser.close();
   if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
   console.log('smoke ok');

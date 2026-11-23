@@ -6,6 +6,8 @@ Routes (every project route is scoped by project id):
     GET  /api/projects                   the projects this viewer serves
     POST /api/projects  {location, code_root?}   open a project: a folder here or a repository
                                          URL; any backend (needs the launch token)
+    POST /api/p/<id>/refresh  {replace?} take the latest from where it is kept, sending
+                                         nothing; 409 when unsent changes would be replaced
     GET  /api/p/<id>/project             name, backend, counts, load errors
     GET  /api/p/<id>/schema              the schema descriptor
     GET  /api/p/<id>/entities            one row per entity
@@ -16,8 +18,8 @@ Routes (every project route is scoped by project id):
     GET  /api/p/<id>/raw?root=&path=     bytes, for images; never active content
 
 Hardening: loopback by default; any Host header the server was not started on is
-refused (DNS rebinding); the one write (opening a project) needs a per-launch
-token embedded in the page, plus a same-origin Origin; paths are contained to
+refused (DNS rebinding); the two writes (opening a project, refreshing one) need
+a per-launch token embedded in the page, plus a same-origin Origin; paths are contained to
 their root; CSP allows only the server's own scripts.
 """
 
@@ -27,16 +29,18 @@ import json
 import mimetypes
 import os
 import posixpath
+import re
 import secrets
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 import szsdlc
 
 from . import __version__
+from .errors import UnsentChanges
 from .project import ProjectError
 from .registry import Registry
 
@@ -111,7 +115,11 @@ class Handler(BaseHTTPRequestHandler):
             body = json.loads(self.rfile.read(length) or b"{}")
         except json.JSONDecodeError:
             return self._problem(HTTPStatus.BAD_REQUEST, "Not JSON", "Send a JSON object.")
-        if urlparse(self.path).path != "/api/projects":
+        route = urlparse(self.path).path
+        refresh = re.fullmatch(r"/api/p/([^/]+)/refresh", route)
+        if refresh:
+            return self._refresh(unquote(refresh.group(1)), body if isinstance(body, dict) else {})
+        if route != "/api/projects":
             return self._problem(HTTPStatus.NOT_FOUND, "Unknown route", self.path)
         if not self.allow_open:
             return self._problem(HTTPStatus.FORBIDDEN, "Opening projects is disabled",
@@ -129,6 +137,20 @@ class Handler(BaseHTTPRequestHandler):
                                  fix="Give a folder on this computer that holds a szsdlc project, or where one "
                                      "is kept, such as https://host/org/repo.git.")
         return self._json(self.registry.summary(pid, self.registry.get(pid)), HTTPStatus.CREATED)
+
+    def _refresh(self, pid: str, body: dict):
+        """Refresh one project. Guarded like opening (token, origin) but not by --no-open: it opens nothing."""
+        project = self.registry.get(pid)
+        if project is None:
+            return self._problem(HTTPStatus.NOT_FOUND, "No such project", pid)
+        try:
+            result = project.refresh_from_backend(replace=body.get("replace") is True)
+        except UnsentChanges as err:
+            return self._problem(HTTPStatus.CONFLICT, "Unsent changes would be replaced", str(err),
+                                 fix="Refresh anyway to replace them, or send them first.")
+        except ProjectError as err:
+            return self._problem(HTTPStatus.BAD_REQUEST, "Cannot refresh", str(err))
+        return self._json({**result, "project": self.registry.summary(pid, project)})
 
     def do_GET(self):
         if not self._host_ok():
