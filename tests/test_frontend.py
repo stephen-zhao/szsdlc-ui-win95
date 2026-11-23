@@ -71,3 +71,39 @@ def test_smoke_in_a_real_browser(project, code_root):
     finally:
         server.shutdown()
         server.server_close()
+
+
+SNAPSHOT_CHECK = r"""
+const { chromium } = require('playwright');
+(async () => {
+  const browser = await chromium.launch();
+  const page = await browser.newPage({ viewport: { width: 1366, height: 860 } });
+  const errors = [];
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.addInitScript(() => { try { localStorage.setItem('szv:welcome', '0'); } catch (e) { /* ignore */ } });
+  await page.goto(process.argv[2]);
+  await page.waitForSelector('.window.active .toolbar');
+  const buttons = await page.$$('.toolbar button[title="Refresh (F5)"]');
+  await browser.close();
+  if (errors.length) { console.error(errors.join(' | ')); process.exit(1); }
+  if (buttons.length) { console.error('a snapshot shows a Refresh button'); process.exit(1); }
+  console.log('snapshot ok');
+})().catch((e) => { console.error(e.message); process.exit(1); });
+"""
+
+
+def test_a_snapshot_has_no_refresh_button(project, code_root, tmp_path):
+    """A snapshot has nothing to refresh from (WI-0055)."""
+    if not _playwright_available():
+        if os.environ.get("SZUI_REQUIRE_BROWSER"):
+            pytest.fail("SZUI_REQUIRE_BROWSER is set but node cannot require('playwright')")
+        pytest.skip("node playwright is not installed")
+    from szsdlc_ui_win95 import export
+
+    registry = Registry()
+    registry.add(project, code_root)
+    out = export.write(registry, tmp_path / "snap.html")
+    script = tmp_path / "check.js"
+    script.write_text(SNAPSHOT_CHECK, encoding="utf-8")
+    result = subprocess.run(["node", str(script), out.as_uri()], capture_output=True, text=True, timeout=120)
+    assert result.returncode == 0, result.stdout + result.stderr

@@ -63,6 +63,11 @@ const { chromium } = require('playwright');
     await page.keyboard.press('F5');  // the shortcut refreshes too, without reloading the page
     await page.waitForSelector(`${W} .statusbar:has-text("Refreshed: nothing new")`);
   });
+  await step('refresh button on the toolbar', async () => {
+    await page.click(`${W} .toolbar button[title="Refresh (F5)"]`);
+    await page.waitForSelector(`${W} .statusbar:has-text("Refreshed: nothing new")`);
+    await page.waitForSelector(`${W} .toolbar button[title="Refresh (F5)"]:not([disabled])`);  // enabled again
+  });
   await browser.close();
   if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
   console.log('smoke ok');
