@@ -520,8 +520,8 @@
     return '/project/' + node;
   }
 
-  function treeRoots({ hideDone = false } = {}) {
-    const keep = (rows) => (hideDone ? rows.filter((r) => !isDone(r)) : rows);
+  function treeRoots({ hideClosed = false } = {}) {
+    const keep = (rows) => (hideClosed ? rows.filter((r) => !isClosed(r)) : rows);
     const itemNodes = (rows, seen) => keep(rows).map((r) => {
       const key = normId(r.id);
       const kids = keep(childrenOf(r.id)).filter((c) => !seen.has(normId(c.id)));
@@ -551,7 +551,7 @@
         { label: 'View', items: () => [
           { label: 'Back', disabled: !back.length, action: goBack }, { label: 'Forward', disabled: !fwd.length, action: goFwd },
           { label: 'Up one level', disabled: !canUp(), action: goUp }, '-',
-          { label: (w.hideDone ? '● ' : ' ') + 'Hide done', action: () => setHideDone(!w.hideDone) }, '-',
+          { label: (w.hideClosed ? '● ' : ' ') + 'Hide closed', action: () => setHideClosed(!w.hideClosed) }, '-',
           { label: 'Roadmap', icon: 'calendar', action: () => navigate('roadmap') },
           ...S.schema.types.map((t) => ({ label: t.plural, icon: typeIcon(t), action: () => navigate('type:' + t.prefix) })),
           '-', { label: 'Display settings…', icon: 'gear', action: openDisplay }] },
@@ -560,7 +560,8 @@
     });
     w.explorer = true;
     w.tabFor = new Map();
-    w.hideDone = store.get('hideDone') === '1';
+    // The key keeps its original name so a saved setting survives the rename.
+    w.hideClosed = store.get('hideDone') === '1';
     let cur = null, selPath = null;
     const back = [], fwd = [];
     const expanded = new Set(['/project']);
@@ -570,14 +571,14 @@
     const crumbs = h('div', { class: 'field crumbbar', role: 'navigation', 'aria-label': 'Address' });
     const search = h('input', { class: 'field', id: uid(), type: 'search', placeholder: 'Find in folder', 'aria-label': 'Find in this folder', style: { width: '140px', flex: 'none' } });
     const hideId = uid();
-    const hideBox = h('input', { type: 'checkbox', id: hideId, checked: w.hideDone || null, onchange: () => setHideDone(hideBox.checked) });
+    const hideBox = h('input', { type: 'checkbox', id: hideId, checked: w.hideClosed || null, onchange: () => setHideClosed(hideBox.checked) });
     const tree = h('div', { class: 'tree', role: 'tree', 'aria-label': 'Folders' });
     const splitter = h('div', { class: 'splitter', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize folders pane', tabindex: '0' });
     const pane = h('div', { class: 'pane' });
     const split = h('div', { class: 'split' }, tree, splitter, pane);
     const foldersBtn = h('button', { class: 'tbtn only-phone', type: 'button', onclick: () => split.classList.toggle('show-tree') }, 'Folders');
     w.body.append(h('div', { class: 'toolbar' }, bBack, bFwd, bUp, h('span', { class: 'tsep' }), crumbs, search,
-      h('label', { class: 'tbtn check-tb', for: hideId, title: 'Hide items in a terminal status, everywhere in this window' }, hideBox, 'Hide done'), foldersBtn), split);
+      h('label', { class: 'tbtn check-tb', for: hideId, title: 'Hide closed items (any terminal status: done, dropped, …) everywhere in this window' }, hideBox, 'Hide closed'), foldersBtn), split);
 
     // The folders pane is resizable; its width is remembered per browser.
     const savedW = +store.get('treeWidth');
@@ -593,11 +594,11 @@
       store.set('treeWidth', String(tree.offsetWidth)); e.preventDefault();
     });
 
-    function setHideDone(on) {
-      w.hideDone = on; hideBox.checked = on; store.set('hideDone', on ? '1' : '0');
+    function setHideClosed(on) {
+      w.hideClosed = on; hideBox.checked = on; store.set('hideDone', on ? '1' : '0'); // original key; see above
       drawTree(); drawPane();
     }
-    const roots = () => treeRoots({ hideDone: w.hideDone });
+    const roots = () => treeRoots({ hideClosed: w.hideClosed });
     // The tree nodes under a path ("/project/type:EPIC/item:EPIC-0007"), or null.
     function nodeAt(path) {
       let nodes = roots(), found = null;
@@ -742,8 +743,8 @@
     function folderContent(k, v) {
       const q = search.value.trim().toLowerCase();
       const match = (r) => !q || `${r.id} ${r.title} ${r.status} ${(r.tags || []).join(' ')}`.toLowerCase().includes(q);
-      const visible = (rows) => rows.filter(match).filter((r) => !(w.hideDone && isDone(r)));
-      const hiddenNote = (all, shown) => (w.hideDone && all > shown ? ` (${all - shown} done hidden)` : '');
+      const visible = (rows) => rows.filter(match).filter((r) => !(w.hideClosed && isClosed(r)));
+      const hiddenNote = (all, shown) => (w.hideClosed && all > shown ? ` (${all - shown} closed hidden)` : '');
       const coll = (rows, opts) => collectionView(visible(rows), { host: w, ...opts });
       if (k === 'project') {
         const flags = (t) => Object.entries(t.flags).filter(([, x]) => x).map(([f]) => humanize(f)).join(', ');
@@ -946,9 +947,9 @@
     return wrap;
   }
   function childrenTab(kids, host) {
-    const shown = host?.hideDone ? kids.filter((r) => !isDone(r)) : kids;
+    const shown = host?.hideClosed ? kids.filter((r) => !isClosed(r)) : kids;
     return h('div', { class: 'panel-fill' }, statusBar(kids),
-      host?.hideDone && shown.length < kids.length ? h('p', { class: 'muted', style: { margin: 0 } }, `${kids.length - shown.length} done hidden.`) : null,
+      host?.hideClosed && shown.length < kids.length ? h('p', { class: 'muted', style: { margin: 0 } }, `${kids.length - shown.length} closed hidden.`) : null,
       collectionView(shown, { key: 'children', host }));
   }
   const STATUS_PAL = ['#000080', '#008080', '#808000', '#800080', '#008000', '#800000', '#404040'];
@@ -993,7 +994,7 @@
       const next = tasks.find((s) => !s.done);
       const pct = tasks.length ? Math.round(100 * done / tasks.length) : 0;
       const hideId = uid();
-      const hide = h('input', { type: 'checkbox', id: hideId, checked: host?.hideDone || null });
+      const hide = h('input', { type: 'checkbox', id: hideId, checked: host?.hideClosed || null });
       const list = h('ol', { class: 'steps' });
       let nextEl = null;
       function draw() {
@@ -1038,9 +1039,9 @@
       if (r) for (const [kind, tgt] of r.relations || []) out.push({ a: k, b: S.byKey.has(normId(tgt)) ? normId(tgt) : String(tgt), kind });
       for (const [kind, src] of S.incoming.get(k) || []) out.push({ a: normId(src), b: k, kind });
       return out.filter((e) => !hidden.has(e.kind)).filter((e) => {
-        if (!host?.hideDone) return true;
+        if (!host?.hideClosed) return true;
         const other = S.byKey.get(e.a === k ? e.b : e.a);
-        return !(other && normId(other.id) !== center && isDone(other));
+        return !(other && normId(other.id) !== center && isClosed(other));
       });
     }
     function build() {
@@ -1144,7 +1145,7 @@
       const [iname, icol] = t ? typeIcon(t) : ['missing'];
       const title = r ? plain(r.title) : 'not found in this project';
       const short = title.length > 30 ? title.slice(0, 29) + '…' : title;
-      parts.push(`<g class="gnode${isC ? ' center' : ''}${r ? '' : ' dangling'}${outside.has(k) ? ' outside' : ''}${r && isDone(r) ? ' done' : ''}" data-k="${esc(k)}" tabindex="0" role="link" aria-label="${esc((r ? r.id : k) + ': ' + title)}">`,
+      parts.push(`<g class="gnode${isC ? ' center' : ''}${r ? '' : ' dangling'}${outside.has(k) ? ' outside' : ''}${r && isClosed(r) ? ' done' : ''}" data-k="${esc(k)}" tabindex="0" role="link" aria-label="${esc((r ? r.id : k) + ': ' + title)}">`,
         `<title>${esc((r ? r.id : k) + ' — ' + title + (r && r.status ? ` (${r.status})` : ''))}</title>`,
         `<rect class="gbox" x="${p.x}" y="${p.y}" width="${NW}" height="${NH}"/>`,
         `<path class="hi" d="M${p.x + .5},${p.y + NH - .5} V${p.y + .5} H${p.x + NW - .5}"/><path class="lo" d="M${p.x + NW - .5},${p.y + .5} V${p.y + NH - .5} H${p.x + .5}"/>`,
@@ -1270,7 +1271,7 @@
   // Any set of items can be looked at three ways, as Explorer's View menu
   // offers: Details (a table), Board (a column per group) and Graph (nodes and
   // edges). The choice and the grouping are remembered per folder.
-  function isDone(r) {
+  function isClosed(r) {
     const st = typeOf(r).workflow.statuses.find((s) => s.name === r.status);
     return !!(st && st.terminal);
   }
@@ -1343,9 +1344,9 @@
     }
     function draw() {
       drawBar();
-      if (view === 'board') body.replaceChildren(boardView(rows, { group, key, open, hideDone: host?.hideDone }));
-      else if (view === 'graph') body.replaceChildren(setGraph(rows, { linked, open, hideDone: host?.hideDone }));
-      else body.replaceChildren(listView({ columns: columns || mixedColumns(), rows, onOpen: open, sortKey: key, empty: host?.hideDone ? 'Nothing here that is not done.' : 'This folder is empty.' }));
+      if (view === 'board') body.replaceChildren(boardView(rows, { group, key, open, hideClosed: host?.hideClosed }));
+      else if (view === 'graph') body.replaceChildren(setGraph(rows, { linked, open, hideClosed: host?.hideClosed }));
+      else body.replaceChildren(listView({ columns: columns || mixedColumns(), rows, onOpen: open, sortKey: key, empty: host?.hideClosed ? 'Nothing here that is still open.' : 'This folder is empty.' }));
     }
     root.append(bar, body);
     draw();
@@ -1356,7 +1357,7 @@
     const t = typeOf(r);
     const kids = childrenOf(r.id);
     const el = h('article', { class: 'card', tabindex: '0', 'data-k': normId(r.id), style: { '--stripe': hashColor(t.prefix) }, title: 'Double-click to open' },
-      h('div', { class: 'card-top' }, icon(typeIcon(t)), h('b', null, r.id), h('span', { class: 'grow' }), r.status ? h('span', { class: 'pill' + (isDone(r) ? ' done' : '') }, r.status) : null, pos ? h('span', { class: 'pos' }, '#' + pos) : null),
+      h('div', { class: 'card-top' }, icon(typeIcon(t)), h('b', null, r.id), h('span', { class: 'grow' }), r.status ? h('span', { class: 'pill' + (isClosed(r) ? ' done' : '') }, r.status) : null, pos ? h('span', { class: 'pos' }, '#' + pos) : null),
       h('div', { class: 'card-title' }, plain(r.title)),
       h('div', { class: 'card-meta' },
         r.progress ? miniProgress(r.progress) : null,
@@ -1366,7 +1367,7 @@
     el.addEventListener('keydown', (e) => { if (e.key === 'Enter') open(r); });
     return el;
   }
-  function boardView(rows, { group, key, open, hideDone = false }) {
+  function boardView(rows, { group, key, open, hideClosed = false }) {
     const spec = groupSpec(rows, group);
     const canvas = h('div', { class: 'board' });
     const colsEl = h('div', { class: 'bcols' });
@@ -1375,13 +1376,13 @@
       let items = rows.filter((r) => spec.of(r).includes(c.key));
       if (spec.position) items.sort((a, b) => spec.position(a) - spec.position(b));
       else items.sort((a, b) => a.type.localeCompare(b.type) || (+a.id.split('-')[1] - +b.id.split('-')[1]));
-      if (!items.length && (c.key.startsWith('\u0000') || (hideDone && c.terminal))) continue;
+      if (!items.length && (c.key.startsWith('\u0000') || (hideClosed && c.terminal))) continue;
       const saved = store.get(collapsedKey(c));
       const collapsed = saved == null ? !!c.collapsed : saved === '1';
       const colEl = h('section', { class: 'bcol' + (collapsed ? ' collapsed' : '') + (c.terminal ? ' terminal' : '') + (items.length ? '' : ' empty') },
         h('header', null,
           h('button', { class: 'bcol-toggle', type: 'button', 'aria-expanded': String(!collapsed), title: collapsed ? 'Expand this column' : 'Collapse this column',
-            onclick: () => { store.set(collapsedKey(c), collapsed ? '0' : '1'); canvas.replaceWith(boardView(rows, { group, key, open, hideDone })); } }, collapsed ? '▸' : '▾'),
+            onclick: () => { store.set(collapsedKey(c), collapsed ? '0' : '1'); canvas.replaceWith(boardView(rows, { group, key, open, hideClosed })); } }, collapsed ? '▸' : '▾'),
           c.icon ? icon(c.icon) : null, h('b', { class: 'ellip' }, c.label), h('span', { class: 'count' }, String(items.length))),
         collapsed ? null : h('div', { class: 'bcol-body' }, items.length ? items.map((r) => itemCard(r, { pos: spec.position && r.placement ? r.placement.position : null, open })) : h('p', { class: 'muted' }, 'Nothing here.')));
       colsEl.append(colEl);
@@ -1426,7 +1427,7 @@
   // A graph of a whole set: columns by longest path along authored edges, so
   // what writes a relation sits left of what it names; one barycentre sweep
   // each way keeps crossings down.
-  function setGraph(rows, { linked, open, hideDone }) {
+  function setGraph(rows, { linked, open, hideClosed }) {
     const inSet = new Set(rows.map((r) => normId(r.id)));
     const keys = new Set(inSet);
     const edges = [];
@@ -1434,14 +1435,14 @@
       const b = S.byKey.has(normId(tgt)) ? normId(tgt) : String(tgt);
       if (!inSet.has(b) && !linked) continue;
       const br = S.byKey.get(b);
-      if (br && hideDone && isDone(br) && !inSet.has(b)) continue;
+      if (br && hideClosed && isClosed(br) && !inSet.has(b)) continue;
       keys.add(b); edges.push({ a: normId(r.id), b, kind });
     }
     if (linked) for (const r of rows) for (const [kind, src] of S.incoming.get(normId(r.id)) || []) {
       const a = normId(src);
       if (inSet.has(a)) continue;
       const ar = S.byKey.get(a);
-      if (ar && hideDone && isDone(ar)) continue;
+      if (ar && hideClosed && isClosed(ar)) continue;
       keys.add(a); edges.push({ a, b: normId(r.id), kind });
     }
     if (!keys.size) return h('p', { class: 'muted pad' }, 'Nothing to draw.');

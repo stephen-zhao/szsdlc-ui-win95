@@ -65,8 +65,8 @@ writes to a project.
 - **Every collection has three views,** Details, Board and Graph. The board
   groups by status, type, parent, roadmap horizon, tag or any declared field;
   the roadmap is a board grouped by horizon, with dependency arrows.
-- **Hide done,** everywhere in a window, using each state's declared
-  `terminal` flag.
+- **Hide closed,** everywhere in a window: every item in a status declared
+  `terminal` (done, dropped and the like).
 - **Markdown, properly.** GitHub-flavoured Markdown, sanitised, with heading
   anchors, ID auto-linking, a Rendered/Source toggle and Copy raw on every
   document.

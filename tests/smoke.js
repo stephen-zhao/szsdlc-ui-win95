@@ -42,10 +42,12 @@ const { chromium } = require('playwright');
     const crumbs = await page.$$eval(`${W} .crumb`, (cs) => cs.map((c) => c.textContent));
     if (crumbs.join('/') !== 'proj/Epics/EPIC-0001/WI-0002') throw new Error(`crumbs: ${crumbs.join('/')}`);
   });
-  await step('board and hide done', async () => {
+  await step('board and hide closed', async () => {
     await page.click(`${W} .crumb:has-text("proj")`);
     await page.locator(`${W} .tree .node:visible`, { hasText: 'Work items' }).first().click();
     await page.waitForSelector(`${W} .board .bcol`);
+    const label = (await page.textContent(`${W} .check-tb`)).trim();
+    if (label !== 'Hide closed') throw new Error(`toolbar toggle says "${label}"`);
     await page.click(`${W} .check-tb`);
     await page.waitForSelector(`${W} .board .card`);
   });
