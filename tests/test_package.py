@@ -12,7 +12,7 @@ import pytest
 import szsdlc_ui_win95
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUIRED = ("static/index.html", "static/app.js", "static/win95.css",
+REQUIRED = ("static/index.html", "static/app.js", "static/refresh.js", "static/win95.css",
             "static/vendor/marked.umd.js", "static/vendor/LICENSE.marked",
             "static/vendor/purify.min.js", "static/vendor/LICENSE.dompurify")
 

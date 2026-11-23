@@ -68,6 +68,16 @@ const { chromium } = require('playwright');
     await page.waitForSelector(`${W} .statusbar:has-text("Refreshed: nothing new")`);
     await page.waitForSelector(`${W} .toolbar button[title="Refresh (F5)"]:not([disabled])`);  // enabled again
   });
+  await step('update automatically is a display setting, and Off turns it off', async () => {
+    await page.click('#start');
+    await page.click('.menu button:has-text("Display settings")');
+    await page.waitForSelector('.window.active legend:has-text("Update automatically")');
+    if (!(await page.isChecked('#szv-auto-60000'))) throw new Error('every minute is not the default');
+    await page.check('#szv-auto-0');
+    const stored = await page.evaluate(() => localStorage.getItem('szv:autoRefresh'));
+    if (stored !== '0') throw new Error(`Off stored ${stored}`);
+    await page.click('.window.active button:has-text("OK")');
+  });
   await browser.close();
   if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
   console.log('smoke ok');

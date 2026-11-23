@@ -47,6 +47,20 @@ def test_app_parses():
     subprocess.run(["node", "--check", str(STATIC / "app.js")], check=True)
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_refresh_scheduler_with_a_fake_clock():
+    """Pause, skip, queue and backoff (WI-0056), in node with a fake clock."""
+    script = Path(__file__).with_name("refresh.test.js")
+    result = subprocess.run(["node", str(script)], capture_output=True, text=True, timeout=60)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_scheduler_names_no_entity_type():
+    script = (STATIC / "refresh.js").read_text(encoding="utf-8")
+    literals = re.findall(r"""['"`]([A-Za-z_]+)['"`]""", script)
+    assert not sorted(set(literals) & set(DEFAULT_TYPES))
+
+
 def _playwright_available() -> bool:
     if shutil.which("node") is None:
         return False

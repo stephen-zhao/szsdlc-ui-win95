@@ -138,13 +138,17 @@ class Project:
         if not report.ok:
             raise ProjectError(f"Could not refresh from where the project is kept: {report.problem}"
                                + (f" Fix: {report.fix}" if report.fix else ""))
+        stamp = self._fingerprint()
         with self._lock:
-            try:
-                self._load()
-                self.load_error = None
-            except Exception as err:  # noqa: BLE001 - shown to the user, never raised into a request
-                self.load_error = f"{type(err).__name__}: {err}"
-            self._stamp = self._fingerprint()
+            # Background refreshes run every minute; when nothing arrived and no
+            # file changed, there is nothing to load again.
+            if report.incoming or stamp != self._stamp or self.load_error:
+                try:
+                    self._load()
+                    self.load_error = None
+                except Exception as err:  # noqa: BLE001 - shown to the user, never raised into a request
+                    self.load_error = f"{type(err).__name__}: {err}"
+            self._stamp = stamp
             self.update_warning = None
         return {"arrived": bool(report.incoming), "replaced": bool(report.replaced), "note": report.note}
 

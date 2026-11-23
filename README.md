@@ -54,6 +54,15 @@ and merges nothing, and every open window redraws in place. A project kept in a
 folder here is simply read again. If the copy holds changes that were never
 sent, Refresh asks before replacing them, and szsdlc keeps what it replaces.
 
+The project on screen also **refreshes itself in the background**, every minute
+by default (Display settings → Update automatically: Off, 30 seconds, 1 minute
+or 5 minutes, per browser). It only runs while the tab is visible, and a project
+you switch to is refreshed once on arrival. A background refresh never replaces
+unsent changes: it skips the project and says so in the status bar. It redraws
+only when something arrived, and never in the middle of a drag, an open menu or
+typing. It also backs off, up to 15 minutes, while it cannot reach where the
+project is kept.
+
 ## What it does
 
 - **One viewer, many projects.** A project button on the taskbar switches
