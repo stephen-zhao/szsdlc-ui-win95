@@ -924,7 +924,7 @@
     const pane = h('div', { class: 'pane' });
     const split = h('div', { class: 'split' }, tree, splitter, pane);
     const foldersBtn = h('button', { class: 'tbtn only-phone', type: 'button', onclick: () => split.classList.toggle('show-tree') }, 'Folders');
-    w.body.append(h('div', { class: 'toolbar' }, bBack, bFwd, bUp, h('span', { class: 'split' }, bRefresh, bInterval), h('span', { class: 'tsep' }), crumbs, search,
+    w.body.append(h('div', { class: 'toolbar' }, bBack, bFwd, bUp, h('span', { class: 'btn-group', role: 'group', 'aria-label': 'Refresh' }, bRefresh, bInterval), h('span', { class: 'tsep' }), crumbs, search,
       h('label', { class: 'tbtn check-tb', for: hideId, title: 'Hide closed items (any terminal status: done, dropped, …) everywhere in this window' }, hideBox, 'Hide closed'), foldersBtn), split);
 
     // The folders pane is resizable; its width is remembered per browser.

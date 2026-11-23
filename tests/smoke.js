@@ -95,6 +95,27 @@ const { chromium } = require('playwright');
     if (await page.isVisible('.window.active legend:has-text("Update automatically")')) throw new Error('Display settings still sets the interval');
     await page.click('.window.active button:has-text("OK")');
   });
+  await step('Refresh and its ▾ are one control, and the address bar follows the buttons', async () => {
+    const measure = () => page.$eval(W, (win) => {
+      const box = (el) => el.getBoundingClientRect();
+      const refreshBtn = win.querySelector('.toolbar button[title="Refresh (F5)"]');
+      const groupEl = refreshBtn.parentElement;
+      const group = box(groupEl);
+      const [refresh, interval] = [refreshBtn, groupEl.querySelector('.interval')].map(box);
+      const sep = box(groupEl.nextElementSibling);
+      const crumbs = box(win.querySelector('.toolbar .crumbbar'));
+      return { group: group.width, buttons: refresh.width + interval.width, gap: interval.left - refresh.right,
+        after: crumbs.left - sep.right };
+    });
+    for (const label of ['normal', 'maximized']) {
+      const m = await measure();
+      if (Math.abs(m.group - m.buttons) > 1) throw new Error(`${label}: the group is ${m.group}px for ${m.buttons}px of buttons`);
+      if (Math.abs(m.gap) > 0.5) throw new Error(`${label}: ${m.gap}px between Refresh and its ▾`);
+      if (m.after > 8) throw new Error(`${label}: the address bar starts ${m.after}px after the buttons`);
+      if (label === 'normal') await page.dblclick(`${W} .titlebar .t`);  // maximize: a wider toolbar
+    }
+    await page.dblclick(`${W} .titlebar .t`);
+  });
   await step('context menu: View as ▸ from a tree folder', async () => {
     await page.locator(`${W} .tree .node:visible`, { hasText: 'Work items' }).first().click({ button: 'right' });
     await page.waitForSelector('.menu button.default:has-text("Open")');
