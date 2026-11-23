@@ -86,6 +86,12 @@ project is kept.
 - **Markdown, properly.** GitHub-flavoured Markdown, sanitised, with heading
   anchors, ID auto-linking, a Rendered/Source toggle and Copy raw on every
   document.
+- **Context menus,** as in Windows 95: right-click, Shift+F10, the Menu key or
+  a long press on an item, folder, document, relation, tab, breadcrumb, window
+  title or the desktop. Menus offer Open in new window, Copy ID, Copy link and
+  Properties, and Alt+Space opens a window's own menu. Text fields and document
+  text keep the browser's menu. A copied link opens what it names:
+  `#<project>--WI-0029`, `#<project>--type:EPIC`, `#<project>--doc:store:<path>`.
 
 ## API
 

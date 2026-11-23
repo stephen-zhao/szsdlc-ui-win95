@@ -406,6 +406,12 @@ button.chip { cursor: pointer; }
 .menu li > button:hover, .menu li > button:focus-visible { background: var(--sel); color: var(--sel-ink); outline: none; }
 .menu li.sep { height: 2px; margin: 3px 2px; box-shadow: inset 0 1px var(--lo), inset 0 -1px var(--hi); }
 .menu li.head { padding: 4px 6px 2px; color: var(--ink-dim); font-size: 11px; }
+.menu li > button.default span { font-weight: bold; }
+.menu li > button .gap { flex: none; display: inline-block; }
+.menu li > button:disabled { color: var(--ink-dim); text-shadow: 1px 1px 0 var(--ink-etch); }
+.menu li > button .arrow { margin-left: auto; padding-left: 16px; font-style: normal; font-size: 9px; }
+.menu li > button.sub[aria-expanded="true"] { background: var(--sel); color: var(--sel-ink); }
+.props dl.kv { margin: 0; }
 
 /* tooltips & dialogs */
 .dialog-body { display: flex; gap: 14px; align-items: flex-start; padding: 8px 6px; }

@@ -6,6 +6,7 @@ const { chromium } = require('playwright');
   const base = process.argv[2];
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: 1366, height: 860 } });
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']).catch(() => {});
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
@@ -93,6 +94,59 @@ const { chromium } = require('playwright');
     await page.click('.menu button:has-text("Display settings")');
     if (await page.isVisible('.window.active legend:has-text("Update automatically")')) throw new Error('Display settings still sets the interval');
     await page.click('.window.active button:has-text("OK")');
+  });
+  await step('context menu: View as ▸ from a tree folder', async () => {
+    await page.locator(`${W} .tree .node:visible`, { hasText: 'Work items' }).first().click({ button: 'right' });
+    await page.waitForSelector('.menu button.default:has-text("Open")');
+    await page.hover('.menu button:has-text("View as")');
+    await page.click('.menu.submenu button:has-text("Details")');
+    await page.waitForSelector(`${W} .lv tr[data-ref="WI-0001"]`);
+  });
+  await step('context menu: item row → Properties', async () => {
+    await page.click(`${W} .lv tr[data-ref="WI-0001"]`, { button: 'right' });
+    await page.click('.menu button:has-text("Properties")');
+    await page.waitForSelector('.window.dialog:has-text("WI-0001 Properties") dd:has-text("Render the tree")');
+    await page.keyboard.press('Escape');
+    if (await page.isVisible('.window.dialog')) throw new Error('Escape did not close Properties');
+  });
+  await step('context menu: tree folder → Open in new window', async () => {
+    const before = await page.$$eval('.window', (ws) => ws.length);
+    await page.locator(`${W} .tree .node:visible`, { hasText: 'Roadmap' }).first().click({ button: 'right' });
+    await page.click('.menu button:has-text("Open in new window")');
+    await page.waitForFunction((n) => document.querySelectorAll('.window').length === n + 1, before);
+    await page.waitForSelector(`${W} .board .bcol header b:has-text("Now")`);
+  });
+  await step('context menu: graph node → Copy ID', async () => {
+    await page.evaluate(() => { location.hash = '#proj--WI-0001'; });
+    await page.waitForSelector(`${W} .item-page h2:has-text("Render the tree")`);
+    await page.click(`${W} .item-page .tab:has-text("Relations")`);
+    await page.click(`${W} .graph .gnode.center`, { button: 'right' });
+    await page.click('.menu button:has-text("Copy ID")');
+    await page.waitForSelector(`${W} .statusbar:has-text("Copied: WI-0001")`);
+  });
+  await step('context menu: Shift+F10 opens it, Escape returns focus', async () => {
+    await page.locator(`${W} .tree .node:visible`, { hasText: 'Work items' }).first().focus();
+    await page.keyboard.press('Shift+F10');
+    await page.waitForSelector('.menu button.default:has-text("Open")');
+    if (!(await page.evaluate(() => !!document.activeElement.closest('.menu')))) throw new Error('the menu did not take focus');
+    await page.keyboard.press('ArrowDown');
+    if ((await page.evaluate(() => document.activeElement.dataset.label)) !== 'Open in new window') throw new Error('ArrowDown did not move');
+    await page.keyboard.press('Escape');
+    if (await page.isVisible('.menu')) throw new Error('Escape did not close the menu');
+    if (!(await page.evaluate(() => document.activeElement.classList.contains('node')))) throw new Error('focus did not return');
+  });
+  await step('context menu: a text field keeps the browser menu', async () => {
+    const prevented = (sel) => page.$eval(sel, (el) => { const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true }); el.dispatchEvent(e); return e.defaultPrevented; });
+    if (await prevented(`${W} input[type=search]`)) throw new Error('the search box lost the browser menu');
+    if (await page.isVisible('.menu')) throw new Error('a menu opened over a text field');
+    if (!(await prevented(`${W} .tree .node`))) throw new Error('a tree node showed the browser menu');
+    await page.keyboard.press('Escape');
+  });
+  await step('context menu: title bar → Minimize', async () => {
+    await page.$eval(W, (el) => { el.dataset.probe = '1'; });
+    await page.click(`${W} .titlebar .t`, { button: 'right' });
+    await page.click('.menu button:has-text("Minimize")');
+    await page.waitForSelector('.window[data-probe="1"].minimized', { state: 'attached' });
   });
   await browser.close();
   if (errors.length) { console.error(errors.join('\n')); process.exit(1); }
