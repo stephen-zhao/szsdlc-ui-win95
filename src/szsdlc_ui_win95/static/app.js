@@ -137,6 +137,8 @@
     board: () => '<rect x=".5" y="1.5" width="4" height="13" fill="#fff" stroke="#404040"/><rect x="6" y="1.5" width="4" height="13" fill="#fff" stroke="#404040"/><rect x="11.5" y="1.5" width="4" height="13" fill="#fff" stroke="#404040"/><rect x="1.5" y="3" width="2" height="2" fill="#000080"/><rect x="1.5" y="6" width="2" height="2" fill="#000080"/><rect x="7" y="3" width="2" height="2" fill="#008080"/><rect x="12.5" y="3" width="2" height="2" fill="#800000"/>',
     graphv: () => '<path d="M4 4L12 8M4 12L12 8" stroke="#404040"/><rect x="1" y="2" width="5" height="4" fill="#c0c0c0" stroke="#000" stroke-width=".8"/><rect x="1" y="10" width="5" height="4" fill="#c0c0c0" stroke="#000" stroke-width=".8"/><rect x="10" y="6" width="5" height="4" fill="#000080" stroke="#000" stroke-width=".8"/>',
     back: () => '<path d="M2 8l6-6v4h6v4H8v4z" fill="#008000" stroke="#003000" stroke-width=".8"/>',
+    // Two arrows chasing each other round a circle: the top one heads right, the bottom one left.
+    refresh: () => '<path d="M3 7a5 5 0 0 1 8.6-3.4" fill="none" stroke="#003000" stroke-width="3"/><path d="M3 7a5 5 0 0 1 8.6-3.4" fill="none" stroke="#008000" stroke-width="1.6"/><path d="M14.5 1.5v5h-5z" fill="#008000" stroke="#003000" stroke-width=".8"/><path d="M13 9a5 5 0 0 1-8.6 3.4" fill="none" stroke="#003000" stroke-width="3"/><path d="M13 9a5 5 0 0 1-8.6 3.4" fill="none" stroke="#008000" stroke-width="1.6"/><path d="M1.5 14.5v-5h5z" fill="#008000" stroke="#003000" stroke-width=".8"/>',
     fwd: () => '<path d="M14 8L8 2v4H2v4h6v4z" fill="#008000" stroke="#003000" stroke-width=".8"/>',
     up: () => '<rect x="1" y="5" width="6" height="2" fill="#c8a030"/><rect x="1" y="6" width="14" height="8" fill="#f2d65c"/><rect x="1" y="13" width="14" height="1" fill="#7a5c00"/><path d="M8 3l-3 4h2v4h2V7h2z" fill="#000" />',
     newwin: () => '<rect x="1.5" y="3.5" width="10" height="9" fill="#fff" stroke="#000"/><rect x="2" y="4" width="9" height="2" fill="#000080"/><rect x="5.5" y=".5" width="10" height="9" fill="#fff" stroke="#000"/><rect x="6" y="1" width="9" height="2" fill="#000080"/>',
@@ -579,6 +581,9 @@
 
     const tb = (ic, label, fn) => h('button', { class: 'tbtn icon', type: 'button', title: label, 'aria-label': label, onclick: fn }, icon(ic));
     const bBack = tb('back', 'Back', () => goBack()), bFwd = tb('fwd', 'Forward', () => goFwd()), bUp = tb('up', 'Up one level', () => goUp());
+    // A snapshot has nothing to refresh from, so it gets no button (as it gets no menu entry).
+    const bRefresh = SNAP ? null : tb('refresh', 'Refresh (F5)', () => refreshProject());
+    if (bRefresh) { bRefresh.disabled = refreshing; w.refreshBtn = bRefresh; }
     const crumbs = h('div', { class: 'field crumbbar', role: 'navigation', 'aria-label': 'Address' });
     const search = h('input', { class: 'field', id: uid(), type: 'search', placeholder: 'Find in folder', 'aria-label': 'Find in this folder', style: { width: '140px', flex: 'none' } });
     const hideId = uid();
@@ -588,7 +593,7 @@
     const pane = h('div', { class: 'pane' });
     const split = h('div', { class: 'split' }, tree, splitter, pane);
     const foldersBtn = h('button', { class: 'tbtn only-phone', type: 'button', onclick: () => split.classList.toggle('show-tree') }, 'Folders');
-    w.body.append(h('div', { class: 'toolbar' }, bBack, bFwd, bUp, h('span', { class: 'tsep' }), crumbs, search,
+    w.body.append(h('div', { class: 'toolbar' }, bBack, bFwd, bUp, bRefresh, h('span', { class: 'tsep' }), crumbs, search,
       h('label', { class: 'tbtn check-tb', for: hideId, title: 'Hide closed items (any terminal status: done, dropped, …) everywhere in this window' }, hideBox, 'Hide closed'), foldersBtn), split);
 
     // The folders pane is resizable; its width is remembered per browser.
@@ -1656,12 +1661,17 @@
   // open window of it in place. Nothing is sent. Replacing unsent changes is
   // asked first, because the copy is otherwise never touched while it holds them.
   let refreshing = false;
+  // While one runs, every Refresh button is disabled, so a second click cannot queue another.
+  function setRefreshing(on) {
+    refreshing = on;
+    for (const w of WM.list) if (w.refreshBtn) w.refreshBtn.disabled = on;
+  }
   async function refreshProject(pid = S?.pid, replace = false) {
     if (SNAP || !pid || refreshing) return;
-    refreshing = true;
+    setRefreshing(true);
     let result;
     try { result = await hub.refresh(pid, replace); } catch (err) {
-      refreshing = false;
+      setRefreshing(false);
       if (err.status === 409) {
         return messageBox({ kind: 'warn', title: 'Refresh', text: [String(err.message), 'Refresh anyway to take the latest, or cancel and send your changes first.'],
           buttons: [{ label: 'Refresh anyway', action: () => refreshProject(pid, true) }, { label: 'Cancel', default: true }] });
@@ -1680,7 +1690,7 @@
         if (front) front.setStatus([result.arrived ? 'Refreshed: changes arrived' : 'Refreshed: nothing new']);
       }
       refreshProjectsWindow();
-    } finally { refreshing = false; }
+    } finally { setRefreshing(false); }
     if (result.replaced) {
       messageBox({ kind: 'warn', title: 'Refresh', text: ['Changes in this copy that differed from the latest were replaced.', result.note ? `szsdlc ${result.note}.` : null].filter(Boolean) });
     }
