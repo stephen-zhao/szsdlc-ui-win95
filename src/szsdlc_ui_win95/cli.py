@@ -15,20 +15,21 @@ from .registry import Registry
 from .server import make_server
 
 
-def parse_project(arg: str) -> tuple[Path, Path | None]:
-    """`STORE` or `STORE::CODE_ROOT`. `::` cannot clash with a Windows drive letter."""
-    store, _, code = arg.partition("::")
-    return Path(store), (Path(code) if code else None)
+def parse_project(arg: str) -> tuple[str, Path | None]:
+    """`LOCATION` or `LOCATION::CODE_ROOT`. `::` clashes neither with a Windows drive nor with a URL scheme."""
+    location, _, code = arg.partition("::")
+    return location, (Path(code) if code else None)
 
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="szsdlc-ui-win95",
                                  description="A Windows 95-styled viewer for szsdlc projects. Read-only.")
-    ap.add_argument("projects", nargs="*", metavar="PROJECT[::CODE_ROOT]",
-                    help="projects to serve, as any folder inside one (default: the current directory)")
+    ap.add_argument("projects", nargs="*", metavar="LOCATION[::CODE_ROOT]",
+                    help="projects to serve: a folder inside one, or where a backend keeps one, "
+                         "such as a git URL (default: the current directory)")
     ap.add_argument("--registered", action="store_true", help="also open every store szsdlc keeps elsewhere")
     ap.add_argument("--projects-file", metavar="FILE",
-                    help="YAML list of {store, code_root}: read at start, rewritten when a project is opened")
+                    help="YAML list of {location, code_root}: read at start, rewritten when a project is opened")
     ap.add_argument("--no-open", action="store_true", help="refuse File > Open project from the browser")
     ap.add_argument("--host", default="127.0.0.1", help="interface to bind (default: loopback only)")
     ap.add_argument("--port", type=int, default=8095, help="port (0 picks a free one; default 8095)")
@@ -49,9 +50,9 @@ def main(argv=None) -> int:
         registry.add_registered()
     entries = args.projects or ([] if registry.projects else ["."])
     for entry in entries:
-        store, code = parse_project(entry)
+        location, code = parse_project(entry)
         try:
-            registry.add(store, code)
+            registry.add(location, code)
         except ProjectError as err:
             print(f"szsdlc-ui-win95: skipped {entry}: {err}", file=sys.stderr)
 
@@ -74,6 +75,8 @@ def main(argv=None) -> int:
     print(f"szsdlc-ui-win95 {__version__} (szsdlc {szsdlc.__version__}): {len(registry.projects)} project(s)")
     for pid, p in registry.projects.items():
         print(f"  {pid:<24} {p.store}  ({len(p.store_model)} entities; code root: {p.code_root or 'none'})")
+        if p.update_warning:
+            print(f"  {'':<24} note: {p.update_warning}")
     print(f"  serving {url}  (read-only; Ctrl-C to stop)")
     if args.open:
         webbrowser.open(url)

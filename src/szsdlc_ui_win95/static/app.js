@@ -60,9 +60,9 @@
   } : {
     meta: () => get('meta'),
     projects: () => get('projects'),
-    async open(store, codeRoot) {
+    async open(location, codeRoot) {
       const r = await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Viewer-Token': TOKEN },
-        body: JSON.stringify({ store, code_root: codeRoot || null }) });
+        body: JSON.stringify({ location, code_root: codeRoot || null }) });
       const body = await r.json();
       if (!r.ok) { const e = new Error(body.detail || body.title || `HTTP ${r.status}`); e.fix = body.fix; throw e; }
       return body;
@@ -1667,7 +1667,7 @@
         { key: 'entity_count', label: 'Items' }, { key: 'type_count', label: 'Types' },
         { key: 'backend', label: 'Backend', get: (p) => p.backend.kind },
         { key: 'schema_source', label: 'Schema', get: (p) => p.schema_source === 'inferred' ? 'inferred' : 'szsdlc config' },
-        { key: 'store', label: 'Store' }, { key: 'code_root', label: 'Code root', get: (p) => p.code_root || '' },
+        { key: 'location', label: 'Location', get: (p) => p.location || p.store }, { key: 'code_root', label: 'Code root', get: (p) => p.code_root || '' },
       ],
       onOpen: (p) => switchProject(p.id),
     }));
@@ -1675,11 +1675,16 @@
   }
   function openProjectDialog() {
     const w = openWindow({ title: 'Open Project', dialog: true, width: 440 });
-    const store = h('input', { class: 'field grow', id: 'szv-open-store', type: 'text', placeholder: '/path/to/project', autocomplete: 'off' });
+    const store = h('input', { class: 'field grow', id: 'szv-open-store', type: 'text', placeholder: 'C:\\code\\project, or https://host/org/repo.git', autocomplete: 'off', spellcheck: 'false' });
     const code = h('input', { class: 'field grow', id: 'szv-open-code', type: 'text', placeholder: 'optional: the repo it describes', autocomplete: 'off' });
     const err = h('p', { class: 'bad', hidden: true });
+    const busy = h('p', { class: 'muted', hidden: true }, 'Opening… a project kept elsewhere is fetched the first time, which can take a moment.');
+    let working = false;
     async function go() {
-      err.hidden = true;
+      if (working) return;
+      working = true;
+      err.hidden = true; busy.hidden = false;
+      w.body.querySelectorAll('button, input').forEach((x) => { x.disabled = true; });
       try {
         const p = await hub.open(store.value.trim(), code.value.trim());
         PROJECTS = await hub.projects();
@@ -1688,14 +1693,17 @@
       } catch (e) {
         err.textContent = e.message + (e.fix ? ` ${e.fix}` : '');
         err.hidden = false;
+      } finally {
+        working = false; busy.hidden = true;
+        w.body.querySelectorAll('button, input').forEach((x) => { x.disabled = false; });
       }
     }
     w.body.append(
       h('div', { class: 'dialog-body' }, icon(['folder'], 32), h('div', { class: 'grow', style: { display: 'grid', gap: '6px' } },
-        h('p', null, 'Type the folder of a szsdlc project: the one holding .szsdlc/config.yml, or any folder inside it.'),
-        h('label', { class: 'row', for: 'szv-open-store' }, h('span', { style: { width: '74px' } }, 'Folder:'), store),
+        h('p', null, 'Type where the project is: a folder on this computer (any folder inside a project works), or where it is kept, such as a repository URL.'),
+        h('label', { class: 'row', for: 'szv-open-store' }, h('span', { style: { width: '74px' } }, 'Location:'), store),
         h('label', { class: 'row', for: 'szv-open-code' }, h('span', { style: { width: '74px' } }, 'Code root:'), code),
-        err)),
+        busy, err)),
       h('div', { class: 'row end' }, h('button', { class: 'btn default', type: 'button', onclick: go }, 'Open'), h('button', { class: 'btn', type: 'button', onclick: () => w.close() }, 'Cancel')));
     store.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });
     store.focus();

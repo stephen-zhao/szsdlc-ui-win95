@@ -4,7 +4,8 @@ Routes (every project route is scoped by project id):
 
     GET  /api/meta                       viewer and szsdlc versions
     GET  /api/projects                   the projects this viewer serves
-    POST /api/projects  {store, code_root?}   open another project (needs the launch token)
+    POST /api/projects  {location, code_root?}   open a project: a folder here or a repository
+                                         URL; any backend (needs the launch token)
     GET  /api/p/<id>/project             name, backend, counts, load errors
     GET  /api/p/<id>/schema              the schema descriptor
     GET  /api/p/<id>/entities            one row per entity
@@ -115,15 +116,18 @@ class Handler(BaseHTTPRequestHandler):
         if not self.allow_open:
             return self._problem(HTTPStatus.FORBIDDEN, "Opening projects is disabled",
                                  "This viewer was started with --no-open; restart it with the project as an argument.")
-        store = str(body.get("store") or "").strip() if isinstance(body, dict) else ""
-        if not store:
-            return self._problem(HTTPStatus.BAD_REQUEST, "No folder given", "Name the project's folder.")
+        # `store` is the 0.1 field name; a location may be a folder here or a repository URL.
+        where = str(body.get("location") or body.get("store") or "").strip() if isinstance(body, dict) else ""
+        if not where:
+            return self._problem(HTTPStatus.BAD_REQUEST, "No location given",
+                                 "Name a folder on this computer, or a repository URL.")
         try:
             code = body.get("code_root")
-            pid = self.registry.add(Path(store), Path(code) if code else None, persist=True)
+            pid = self.registry.add(where, Path(code) if code else None, persist=True)
         except ProjectError as err:
-            return self._problem(HTTPStatus.BAD_REQUEST, "Not a szsdlc project", str(err),
-                                 fix="Choose the folder that holds .szsdlc/config.yml, or run `szsdlc init` there.")
+            return self._problem(HTTPStatus.BAD_REQUEST, "Cannot open that project", str(err),
+                                 fix="Give a folder on this computer that holds a szsdlc project, or where one "
+                                     "is kept, such as https://host/org/repo.git.")
         return self._json(self.registry.summary(pid, self.registry.get(pid)), HTTPStatus.CREATED)
 
     def do_GET(self):

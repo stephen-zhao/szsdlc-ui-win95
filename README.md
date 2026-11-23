@@ -25,6 +25,7 @@ project. Other ways to run it:
 
 ```sh
 szsdlc-ui-win95 ~/code/app ~/code/lab                 # several projects in one viewer
+szsdlc-ui-win95 https://github.com/org/tracker.git    # a project kept in a git repository
 szsdlc-ui-win95 ~/sdlc-store::~/code/app              # resolve out-of-tree docs against ~/code/app
 szsdlc-ui-win95 --registered                          # every store szsdlc keeps elsewhere
 szsdlc-ui-win95 --projects-file ~/.config/szsdlc/viewer.yml   # remembered projects
@@ -32,10 +33,20 @@ szsdlc-ui-win95 ~/code/app --export app.html          # one self-contained HTML 
 szsdlc-ui-win95 --port 0                              # any free port
 ```
 
-A project is any folder inside one. For a store kept elsewhere (a `git` or
-`dir` backend), point at the code repository: the viewer finds the store with
-szsdlc's `backend.locate`, which **never creates or clones** one, and uses the
-repository as the code root for out-of-tree documents.
+A project can be opened from **any location, whatever backend keeps it**: on
+the command line, in the projects file, or with File → Open project…:
+
+- **a folder on this computer**: a project, or any folder inside one. For a
+  code repository whose settings keep its project elsewhere (a `git` or `dir`
+  backend), that store is used, created or cloned if needed, and the repository
+  becomes the code root for out-of-tree documents;
+- **where a project is kept**, such as a git URL (`https://host/org/repo.git`,
+  `git@host:org/repo.git`, optionally `#branch`). It is cloned the first time,
+  exactly as szsdlc's git backend clones it.
+
+Opening a project it already has brings a clone up to date, but only when that
+clone has nothing unsent; otherwise the clone is shown as it is. Viewing never
+writes to a project.
 
 ## What it does
 

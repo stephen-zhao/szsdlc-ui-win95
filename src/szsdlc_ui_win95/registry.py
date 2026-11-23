@@ -16,6 +16,7 @@ from pathlib import Path
 import yaml
 from szsdlc import backend as sz_backend
 
+from . import locations
 from .project import Project, ProjectError
 
 
@@ -31,18 +32,23 @@ class Registry:
         self.projects: dict[str, Project] = {}
         self._lock = threading.Lock()
 
-    def add(self, start, code_root=None, persist: bool = False) -> str:
-        """Open a project (or any folder inside one) and return its id. Opening it again returns the same id."""
-        start = Path(start).expanduser().resolve()
+    def add(self, location, code_root=None, persist: bool = False) -> str:
+        """Open a project from any location and return its id. Opening it again returns the same id.
+
+        A location is a folder on this computer (or any folder inside a
+        project), or a place a backend keeps one, such as a git URL.
+        """
+        text = str(location).strip()
+        key = text if locations.is_remote(text) else str(Path(text).expanduser().resolve())
         if code_root is not None:
             code_root = Path(code_root).expanduser().resolve()
             if not code_root.is_dir():
                 raise ProjectError(f"code root {code_root} is not a directory")
         with self._lock:
             for pid, p in self.projects.items():
-                if start in (p.start, p.store):
+                if key in (p.location, str(p.start), str(p.store)):
                     return pid
-            project = Project(start, code_root, self.excludes)
+            project = Project(key, code_root, self.excludes)
             for pid, p in self.projects.items():
                 if p.store == project.store:
                     return pid
@@ -67,6 +73,8 @@ class Registry:
             "backend": info["backend"], "schema_source": info["schema_source"], "szsdlc_version": info["szsdlc_version"],
             "entity_count": info["entity_count"], "type_count": len(project.schema["types"]),
             "unparseable": len(info["unparseable"]), "load_error": info["load_error"],
+            "remote": project.remote, "update_warning": info["update_warning"],
+            "location": (info["location"] if project.remote else project.store.name) if public else info["location"],
         }
 
     def listing(self) -> list[dict]:
@@ -82,7 +90,7 @@ class Registry:
             stores = {}
         for store in stores:
             try:
-                self.add(Path(store))
+                self.add(store)
             except ProjectError as err:
                 print(f"  skipped registered store {store}: {err}", file=sys.stderr)
 
@@ -91,16 +99,18 @@ class Registry:
             return
         data = yaml.safe_load(self.projects_file.read_text(encoding="utf-8")) or []
         for entry in data if isinstance(data, list) else []:
-            entry = entry if isinstance(entry, dict) else {"store": entry}
+            entry = entry if isinstance(entry, dict) else {"location": entry}
             try:
-                self.add(Path(entry["store"]), Path(entry["code_root"]) if entry.get("code_root") else None)
+                where = entry.get("location") or entry["store"]  # `store` is the 0.1 spelling
+                self.add(where, Path(entry["code_root"]) if entry.get("code_root") else None)
             except (KeyError, ProjectError) as err:
                 print(f"  skipped a project in {self.projects_file}: {err}", file=sys.stderr)
 
     def save(self) -> None:
         if not self.projects_file:
             return
-        rows = [{"store": str(p.start), **({"code_root": str(p.code_root)} if p.code_root else {})}
+        # A remote project is saved by its location, so it reopens on a machine that never cloned it.
+        rows = [{"location": p.location if p.remote else str(p.start), **({"code_root": str(p.code_root)} if p.code_root else {})}
                 for p in self.projects.values()]
         self.projects_file.parent.mkdir(parents=True, exist_ok=True)
         self.projects_file.write_text(yaml.safe_dump(rows, sort_keys=False), encoding="utf-8")
