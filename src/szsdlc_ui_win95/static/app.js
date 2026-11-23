@@ -266,29 +266,90 @@
   }
 
   // ------------------------------------------------------------------ menus
+  // One menu is open at a time, with at most one submenu. Items are
+  // { label, action, icon, disabled, default, items } or '-' or { head }.
   let openMenuEl = null;
   function closeMenus() {
     if (!openMenuEl) return;
-    openMenuEl.el.remove(); openMenuEl.anchor?.setAttribute('aria-expanded', 'false'); openMenuEl = null;
+    const m = openMenuEl; openMenuEl = null;
+    m.el.remove(); m.sub?.el.remove(); m.anchor?.setAttribute('aria-expanded', 'false');
+    // Focus goes back to where the menu was opened, unless something took it since.
+    const lost = !document.activeElement || document.activeElement === document.body;
+    if (lost && m.ret && m.ret.isConnected && typeof m.ret.focus === 'function') m.ret.focus({ preventScroll: true });
     setTimeout(() => flushPending(), 0);  // a redraw that waited for the menu
   }
-  function popMenu(anchor, items, opts = {}) {
-    closeMenus();
-    const list = h('ul', { role: 'menu' }, items.map((it) => {
+  // Put a menu at (x, y), flipping it to the other side of (fx, fy) when it would leave the screen.
+  function placeMenu(el, x, y, fx = x, fy = y) {
+    const w = el.offsetWidth, ht = el.offsetHeight;
+    el.style.left = Math.max(0, x + w > innerWidth ? fx - w : x) + 'px';
+    el.style.top = Math.max(0, y + ht > innerHeight ? fy - ht : y) + 'px';
+  }
+  const menuLabel = (b) => (b.dataset.label || '').replace(/^[^\p{L}\p{N}]+/u, '').toLowerCase();
+  function menuKeys(el, e) {
+    const btns = [...el.querySelectorAll(':scope > ul > li > button:not(:disabled)')];
+    if (!btns.length) return;
+    const n = btns.length, i = btns.indexOf(document.activeElement);
+    const to = (j) => { btns[((j % n) + n) % n].focus(); e.preventDefault(); e.stopPropagation(); };
+    if (e.key === 'ArrowDown') return to(i + 1);
+    if (e.key === 'ArrowUp') return to(i < 0 ? n - 1 : i - 1);
+    if (e.key === 'Home') return to(0);
+    if (e.key === 'End') return to(n - 1);
+    if (e.key === 'Tab') return e.preventDefault();
+    if (e.key.length === 1 && /\S/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const c = e.key.toLowerCase();
+      for (let k = 1; k <= n; k++) if (menuLabel(btns[(i + k + n) % n]).startsWith(c)) return to(i + k);
+    }
+  }
+  function menuList(items, opts, onSub) {
+    const size = opts.big ? 24 : 16;
+    const gutter = items.some((it) => it && it.icon);  // labels line up when some items have icons
+    const list = h('ul', { role: 'menu' }, items.filter(Boolean).map((it) => {
       if (it === '-') return h('li', { class: 'sep', role: 'separator' });
       if (it.head) return h('li', { class: 'head' }, it.head);
-      return h('li', { role: 'none' }, h('button', {
-        type: 'button', role: 'menuitem', disabled: it.disabled || null, title: it.title || null,
-        onclick: () => { closeMenus(); it.action?.(); },
-      }, it.icon ? icon(it.icon, opts.big ? 24 : 16) : null, h('span', null, it.label)));
+      const b = h('button', {
+        type: 'button', role: 'menuitem', disabled: it.disabled || null, title: it.title || null, 'data-label': it.label,
+        class: [it.default ? 'default' : '', it.items ? 'sub' : ''].join(' ').trim() || null, 'aria-haspopup': it.items ? 'menu' : null,
+        onclick: () => { if (it.items) return onSub(b, it.items, true); closeMenus(); it.action?.(); },
+      }, it.icon ? icon(it.icon, size) : gutter ? h('i', { class: 'gap', style: { width: size + 'px' }, 'aria-hidden': 'true' }) : null, h('span', null, it.label), it.items ? h('i', { class: 'arrow', 'aria-hidden': 'true' }, '▸') : null);
+      b.addEventListener('mouseenter', () => onSub(it.items ? b : null, it.items, false));
+      if (it.items) b.addEventListener('keydown', (e) => { if (e.key === 'ArrowRight') { e.preventDefault(); e.stopPropagation(); onSub(b, it.items, true); } });
+      return h('li', { role: 'none' }, b);
     }));
-    const el = h('div', { class: 'menu' + (opts.big ? ' big' : '') + (opts.scroll ? ' scroll' : '') }, opts.banner || null, list);
+    return h('div', { class: 'menu' + (opts.big ? ' big' : '') + (opts.scroll ? ' scroll' : '') }, opts.banner || null, list);
+  }
+  // `anchor` is the button the menu drops from; `opts.at` ({x, y}) places it at a point instead.
+  function popMenu(anchor, items, opts = {}) {
+    closeMenus();
+    const ret = opts.ret || anchor || (document.activeElement !== document.body ? document.activeElement : null);
+    function closeSub() { if (openMenuEl?.sub) { openMenuEl.sub.btn.setAttribute('aria-expanded', 'false'); openMenuEl.sub.el.remove(); openMenuEl.sub = null; } }
+    function openSub(btn, subItems, focus) {
+      if (openMenuEl?.sub?.btn === btn && btn) { if (focus) openMenuEl.sub.el.querySelector('button:not(:disabled)')?.focus(); return; }
+      closeSub();
+      if (!btn || !subItems || btn.disabled) return;
+      const sub = menuList(subItems, {}, () => {});
+      sub.classList.add('submenu');
+      document.body.append(sub);
+      const r = btn.getBoundingClientRect();
+      placeMenu(sub, r.right - 3, r.top - 3, r.left + 3, r.bottom + 3);
+      sub.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowLeft' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSub(); btn.focus(); return; }
+        menuKeys(sub, e);
+      });
+      btn.setAttribute('aria-expanded', 'true');
+      openMenuEl.sub = { el: sub, btn };
+      if (focus) sub.querySelector('button:not(:disabled)')?.focus();
+    }
+    const el = menuList(items, opts, openSub);
     document.body.append(el);
-    const r = anchor.getBoundingClientRect();
-    if (opts.above) { el.style.left = r.left + 'px'; el.style.bottom = (innerHeight - r.top) + 'px'; }
-    else { el.style.left = Math.min(r.left, innerWidth - el.offsetWidth - 4) + 'px'; el.style.top = r.bottom + 'px'; }
-    anchor.setAttribute('aria-expanded', 'true');
-    openMenuEl = { el, anchor };
+    if (opts.at) placeMenu(el, opts.at.x, opts.at.y);
+    else {
+      const r = anchor.getBoundingClientRect();
+      if (opts.above) { el.style.left = r.left + 'px'; el.style.bottom = (innerHeight - r.top) + 'px'; }
+      else { el.style.left = Math.max(0, Math.min(r.left, innerWidth - el.offsetWidth - 4)) + 'px'; el.style.top = r.bottom + 'px'; }
+      anchor.setAttribute('aria-expanded', 'true');
+    }
+    el.addEventListener('keydown', (e) => menuKeys(el, e));
+    openMenuEl = { el, anchor, ret, sub: null };
     el.querySelector('button:not(:disabled)')?.focus();
   }
   function menubar(spec) {
@@ -297,13 +358,274 @@
       onclick: (e) => { e.stopPropagation(); if (openMenuEl?.anchor === e.currentTarget) closeMenus(); else popMenu(e.currentTarget, typeof m.items === 'function' ? m.items() : m.items); },
     }, h('u', null, m.label[0]), m.label.slice(1))));
   }
-  document.addEventListener('pointerdown', (e) => { if (openMenuEl && !openMenuEl.el.contains(e.target) && e.target !== openMenuEl.anchor && !openMenuEl.anchor.contains(e.target)) closeMenus(); });
+  document.addEventListener('pointerdown', (e) => {
+    const m = openMenuEl;
+    if (m && !m.el.contains(e.target) && !m.sub?.el.contains(e.target) && !(m.anchor && m.anchor.contains(e.target))) closeMenus();
+  });
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (openMenuEl) return closeMenus();
     const dlg = WM.list.filter((w) => w.el.classList.contains('dialog')).at(-1);
     dlg?.close();
   });
+
+  // --------------------------------------------------------- context menus
+  // Right-click, Shift+F10, the Menu key or a long press opens a menu for what
+  // is under it, as in Windows 95; Alt+Space opens the active window's menu.
+  // Text fields, document text and selected text keep the browser's own menu.
+  const winOf = (el) => (el instanceof Element ? WM.list.find((w) => w.el.contains(el) || w.taskBtn === el || w.taskBtn?.contains(el)) : null) || null;
+  function ctxTarget(el) {
+    if (!(el instanceof Element)) return null;
+    const at = (sel) => el.closest(sel);
+    let t;
+    if ((t = at('button.link[data-ref], .gnode[data-k], .card[data-k], tr[data-ref]'))) return { kind: 'item', ref: t.dataset.ref || t.dataset.k, el: t };
+    if ((t = at('.edge[data-a], .elabel[data-a], .dep[data-a], tr[data-a]'))) return { kind: 'edge', a: t.dataset.a, b: t.dataset.b, rel: t.dataset.kind || '', el: t };
+    if ((t = at('tr[data-doc-path]'))) return { kind: 'doc', root: t.dataset.docRoot, path: t.dataset.docPath, el: t };
+    if ((t = at('.tree .node[data-node]'))) {
+      const node = t.dataset.node;
+      return node.startsWith('item:') ? { kind: 'item', ref: node.slice(5), el: t } : { kind: 'folder', node, path: t.dataset.path, kids: !!t.dataset.kids, el: t };
+    }
+    if ((t = at('tr[data-node]'))) return { kind: 'folder', node: t.dataset.node, el: t };
+    if ((t = at('.crumb[data-node]'))) return { kind: 'crumb', node: t.dataset.node, path: t.dataset.path, text: t.dataset.text, el: t };
+    if ((t = at('.item-page[data-item] .tab[data-id]'))) return { kind: 'tab', id: t.dataset.id, ref: t.closest('.item-page').dataset.item, el: t };
+    if ((t = at('.titlebar, #tasks > button'))) { const w = winOf(t); return w ? { kind: 'window', w, el: t } : null; }
+    if ((t = at('.desk-icon'))) return { kind: 'icon', node: t.dataset.node, el: t };
+    if (el.id === 'desktop') return { kind: 'desktop', el };
+    return null;
+  }
+  function keepBrowserMenu(el) {
+    if (!(el instanceof Element)) return false;
+    if (el.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"]')) return true;
+    const sel = getSelection();
+    if (sel && !sel.isCollapsed && String(sel).trim()) return true;
+    return !!el.closest('.page') && !el.closest('button.link[data-ref]');
+  }
+
+  // Copying, with the fallback for a page the clipboard API refuses (http, a file).
+  function execCopy(text) {
+    const ta = h('textarea', { style: { position: 'fixed', left: '-9999px', top: '0' } });
+    ta.value = text; document.body.append(ta); ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    ta.remove();
+    return ok;
+  }
+  async function copyPlain(text, src) {
+    let ok = false;
+    try { await navigator.clipboard.writeText(text); ok = true; } catch { ok = execCopy(text); }
+    const w = winOf(src);
+    const host = w && w.el.querySelector(':scope > .statusbar') ? w : explorerFor(src);
+    host?.setStatus([ok ? `Copied: ${text}` : 'The browser blocked the clipboard.']);
+    return ok;
+  }
+  // A link that opens what it names: an item, a folder or a document (see openTarget).
+  const linkTo = (target) => location.href.split('#')[0] + '#' + S.pid + '--' + encodeURI(target);
+
+  // Open an item on a given tab of its page.
+  function openItemOn(ref, tab, src, { newWindow = false } = {}) {
+    const row = S.byKey.get(normId(ref));
+    if (!row) return openItem(ref, src);
+    const x = newWindow ? null : explorerFor(src);
+    if (x) { x.tabFor.set(normId(row.id), tab); return go('item:' + row.id, src); }
+    const w = openExplorer('item:' + row.id);  // the page reads its tab once the item arrives
+    w.tabFor.set(normId(row.id), tab);
+    return w;
+  }
+  // The collection key a folder's view is stored under (see collectionView).
+  function viewKeyOf(node) {
+    const [k, v] = splitNode(node);
+    if (k === 'type') { const t = S.types.get(v); return t ? { key: node, def: t.flags.actionable ? 'board' : 'details' } : null; }
+    if (k === 'tag') return { key: 'tag', def: 'details' };
+    if (k === 'roadmap') return { key: 'roadmap', def: 'board' };
+    if (k === 'inbox') return { key: 'inbox', def: 'details' };
+    return null;
+  }
+  function viewAsMenu(node, src) {
+    const vk = viewKeyOf(node);
+    if (!vk) return [];
+    const cur = store.get('view:' + vk.key) || vk.def;
+    return [{ label: 'View as', items: VIEWS.map(([v, label, ic]) => ({ label: (cur === v ? '● ' : ' ') + label, icon: ic, action: () => {
+      store.set('view:' + vk.key, v);
+      const x = go(node, src);
+      explorersHere().forEach((o) => { if (o !== x) o.redraw(); });
+    } })) }, '-'];
+  }
+
+  function itemMenu(ref, src) {
+    const r = S.byKey.get(normId(ref));
+    if (!r) return [{ label: 'Open', default: true, disabled: true, title: `${ref} is not in this project` }, '-', { label: 'Copy ID', action: () => copyPlain(String(ref), src) }];
+    const t = typeOf(r);
+    const show = (tab) => () => openItemOn(r.id, tab, src);
+    return [
+      { label: 'Open', default: true, action: () => openItem(r.id, src) },
+      { label: 'Open in new window', icon: 'newwin', action: () => openItem(r.id, null, { newWindow: true }) },
+      '-',
+      { label: 'Show relations', action: show('relations') },
+      { label: 'Show documents', action: show('documents') },
+      { label: 'Show children', disabled: !(t.flags.can_parent || childrenOf(r.id).length), action: show('children') },
+      '-',
+      { label: 'Copy ID', icon: 'copy', action: () => copyPlain(r.id, src) },
+      { label: 'Copy link', action: () => copyPlain(linkTo(r.id), src) },
+      '-',
+      { label: 'Properties', action: () => openProperties(r) },
+    ];
+  }
+  function ctxItems(t) {
+    const src = t.el;
+    switch (t.kind) {
+      case 'item': return itemMenu(t.ref, src);
+      case 'folder': {
+        const x = winOf(src)?.explorer ? winOf(src) : null;
+        return [
+          { label: 'Open', default: true, action: () => (x && t.path ? (x.navigateTo(t.node, t.path), x) : go(t.node, src)) },
+          { label: 'Open in new window', icon: 'newwin', action: () => openExplorer(t.node) },
+          '-',
+          ...(x && t.kids ? [{ label: x.isExpanded(t.path) ? 'Collapse' : 'Expand', action: () => x.toggleNode(t.path) }, '-'] : []),
+          ...viewAsMenu(t.node, src),
+          { label: 'Copy link', action: () => copyPlain(linkTo(t.node), src) },
+        ];
+      }
+      case 'doc': return [
+        { label: 'Open', default: true, action: () => openPath(t.root, t.path, src) },
+        { label: 'Open in Document Viewer', icon: 'doc', action: () => openDoc(t.root, t.path, { fallback: true }) },
+        '-',
+        { label: 'Show source', action: () => openDoc(t.root, t.path, { fallback: true, mode: 'source' }) },
+        { label: 'Show rendered', action: () => openDoc(t.root, t.path, { fallback: true, mode: 'rendered' }) },
+        '-',
+        { label: 'Copy path', icon: 'copy', action: () => copyPlain(t.path, src) },
+        { label: 'Copy link', action: () => copyPlain(linkTo(`doc:${t.root}:${t.path}`), src) },
+      ];
+      case 'edge': {
+        const id = (k) => S.byKey.get(normId(k))?.id || k;
+        return [
+          { label: 'Open source', default: true, disabled: !S.byKey.has(normId(t.a)), action: () => openItem(t.a, src) },
+          { label: 'Open target', disabled: !S.byKey.has(normId(t.b)), action: () => openItem(t.b, src) },
+          '-',
+          { label: 'Copy as text', icon: 'copy', action: () => copyPlain(`${id(t.a)} ${t.rel} ${id(t.b)}`.replace(/\s+/g, ' '), src) },
+        ];
+      }
+      case 'tab': return [
+        { label: 'Show', default: true, action: () => t.el.click() },
+        { label: 'Open in new window', icon: 'newwin', action: () => openItemOn(t.ref, t.id, null, { newWindow: true }) },
+      ];
+      case 'crumb': return [
+        { label: 'Open', default: true, action: () => t.el.click() },
+        { label: 'Open in new window', icon: 'newwin', action: () => openExplorer(t.node) },
+        '-',
+        { label: 'Copy path', icon: 'copy', action: () => copyPlain(t.text, src) },
+      ];
+      case 'window': {
+        const w = t.w, el = w.el, dlg = el.classList.contains('dialog');
+        const min = el.classList.contains('minimized'), max = el.classList.contains('maximized');
+        return [
+          { label: 'Restore', disabled: dlg || !(min || max), action: () => { if (min) { w.restore(); w.focus(); } else w.toggleMax(); } },
+          { label: 'Minimize', disabled: dlg || min, action: () => w.minimize() },
+          { label: 'Maximize', disabled: dlg || max, action: () => { w.restore(); w.focus(); w.toggleMax(); } },
+          '-',
+          { label: 'Close', default: true, action: () => w.close() },
+        ];
+      }
+      case 'icon': {
+        const node = t.node;
+        if (!node) return [{ label: 'Open', default: true, action: () => t.el.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })) }];
+        return [
+          { label: 'Open', default: true, action: () => go(node, null) },
+          { label: 'Open in new window', icon: 'newwin', action: () => openExplorer(node) },
+        ];
+      }
+      case 'desktop': return [
+        ...(SNAP ? [] : [{ label: 'Refresh', icon: 'refresh', action: () => refreshProject() }, '-']),
+        { label: 'Display settings…', icon: 'gear', action: openDisplay },
+      ];
+      default: return null;
+    }
+  }
+  // When a key or a long press last opened a menu: the browser may follow either
+  // with its own contextmenu event for the same gesture, which is swallowed.
+  let ctxAt = 0;
+  function openCtx(t, x, y) {
+    if (!S) return false;
+    const items = ctxItems(t);
+    if (!items || !items.length) return false;
+    // As in Explorer, what you right-click becomes the selection.
+    if (t.el.matches('tr, .desk-icon, .card')) {
+      t.el.parentElement?.querySelectorAll(':scope > .sel').forEach((s) => s.classList.remove('sel'));
+      t.el.classList.add('sel');
+    }
+    popMenu(null, items, { at: { x, y }, ret: t.el.matches('button, [tabindex]') ? t.el : null });
+    return true;
+  }
+  function ctxAtElement(el) {
+    const r = el.getBoundingClientRect();
+    return { x: Math.round(r.left + Math.min(24, r.width / 2)), y: Math.round(r.top + Math.min(r.height, 28)) };
+  }
+  document.addEventListener('contextmenu', (e) => {
+    clearTimeout(press.timer);
+    if (keepBrowserMenu(e.target)) return;
+    if (Date.now() - ctxAt < 500) { ctxAt = 0; e.preventDefault(); return; }
+    e.preventDefault();
+    if (e.target instanceof Element && e.target.closest('.menu')) return;
+    const t = ctxTarget(e.target);
+    if (t) openCtx(t, e.clientX, e.clientY); else closeMenus();
+  });
+  document.addEventListener('keydown', (e) => {
+    const kb = e.key === 'ContextMenu' || (e.key === 'F10' && e.shiftKey);
+    if (kb) {
+      const el = document.activeElement;
+      if (keepBrowserMenu(el) || (el && el.closest('.menu'))) return;
+      e.preventDefault();
+      const t = ctxTarget(el);
+      if (t) { const p = ctxAtElement(t.el); if (openCtx(t, p.x, p.y)) ctxAt = Date.now(); }
+      return;
+    }
+    if (e.key === ' ' && e.altKey && !e.ctrlKey && !e.metaKey) {
+      const w = WM.active;
+      if (!w) return;
+      e.preventDefault();
+      const bar = w.el.querySelector('.titlebar');
+      const r = bar.getBoundingClientRect();
+      if (openCtx({ kind: 'window', w, el: bar }, Math.round(r.left), Math.round(r.bottom))) ctxAt = Date.now();
+    }
+  });
+  // A long press on a touch screen is a right-click.
+  const press = { timer: 0, x: 0, y: 0, fired: 0 };
+  document.addEventListener('pointerdown', (e) => {
+    clearTimeout(press.timer);
+    if (e.pointerType !== 'touch' || keepBrowserMenu(e.target)) return;
+    const t = ctxTarget(e.target);
+    if (!t) return;
+    press.x = e.clientX; press.y = e.clientY;
+    press.timer = setTimeout(() => { if (openCtx(t, press.x, press.y)) press.fired = ctxAt = Date.now(); }, 500);
+  });
+  document.addEventListener('pointermove', (e) => { if (press.timer && Math.hypot(e.clientX - press.x, e.clientY - press.y) > 10) clearTimeout(press.timer); });
+  ['pointerup', 'pointercancel'].forEach((ev) => document.addEventListener(ev, () => clearTimeout(press.timer)));
+  // The tap that ends a long press does not also open what it pressed.
+  document.addEventListener('click', (e) => {
+    if (press.fired && Date.now() - press.fired < 800 && !(e.target instanceof Element && e.target.closest('.menu'))) { e.preventDefault(); e.stopPropagation(); }
+    press.fired = 0;
+  }, true);
+
+  // A read-only property sheet, as Windows' Properties dialog.
+  function openProperties(r) {
+    const t = typeOf(r);
+    const w = openWindow({ key: 'props:' + S.pid + ':' + normId(r.id), title: `${r.id} Properties`, dialog: true, width: 420 });
+    if (w.reused) return w;
+    const ctx = { root: 'store', path: r.path };
+    const rels = (r.relations || []).length + (S.incoming.get(normId(r.id)) || []).length;
+    const none = (x) => x || h('span', { class: 'muted' }, '(none)');
+    const rows = [
+      ['ID', r.id], ['Title', plain(r.title)], ['Type', `${t.label} (${t.prefix})`], ['Status', none(r.status)],
+      ...t.fields.map((f) => [humanize(f.name), fieldValue(f, (r.fields || {})[f.name], ctx)]),
+      ['Tags', none((r.tags || []).join(', '))],
+      [humanize(S.schema.parent_relation || 'parent'), r.parent ? entLink(r.parent) : none(null)],
+      ['Children', String(r.children || 0)], ['Relations', String(rels)], ['Path', r.path],
+    ];
+    w.body.append(
+      h('div', { class: 'dialog-body props' }, icon(typeIcon(t), 32), h('dl', { class: 'kv grow' }, rows.map(([k, v]) => [h('dt', null, k), h('dd', null, v)]))),
+      h('div', { class: 'row end' }, h('button', { class: 'btn default', type: 'button', onclick: () => w.close() }, 'OK')));
+    w.body.querySelector('.btn.default').focus();
+    return w;
+  }
 
   // --------------------------------------------------------------- dialogs
   function messageBox({ title, kind = 'info', text, buttons }) {
@@ -329,7 +651,7 @@
   }
   function entLink(ref, label) {
     const row = S.byKey.get(normId(ref));
-    const b = h('button', { class: 'link', type: 'button', title: row ? `${row.title} (${row.status || 'no status'})` : 'Not found in this project',
+    const b = h('button', { class: 'link', type: 'button', 'data-ref': ref, title: row ? `${row.title} (${row.status || 'no status'})` : 'Not found in this project',
       onclick: (e) => { e.preventDefault(); openItem(ref, e.currentTarget); } }, label || ref);
     if (!row) b.classList.add('bad');
     return b;
@@ -397,7 +719,10 @@
   }
 
   // ------------------------------------------------------------- listview
-  function listView({ columns, rows, onOpen, empty = 'This folder is empty.', sortKey = 'listview' }) {
+  // `ctx(row)` gives a row's data attributes, which say what its context menu is
+  // for; by default a row whose id names an item is that item.
+  const itemCtx = (r) => (r && r.id && S.byKey.has(normId(r.id)) ? { 'data-ref': r.id } : null);
+  function listView({ columns, rows, onOpen, empty = 'This folder is empty.', sortKey = 'listview', ctx = itemCtx }) {
     const box = h('div', { class: 'lv' });
     let sort = null;
     try { sort = JSON.parse(store.get('sort:' + sortKey) || 'null'); } catch { sort = null; }
@@ -415,7 +740,7 @@
         onclick: () => { sort = sort && sort.key === c.key ? { key: c.key, dir: -sort.dir } : { key: c.key, dir: 1 }; store.set('sort:' + sortKey, JSON.stringify(sort)); draw(); },
       }, c.label))));
       const tbody = h('tbody', null, data.length ? data.map((r) => {
-        const tr = h('tr', { tabindex: '0' }, columns.map((c) => {
+        const tr = h('tr', { tabindex: '0', ...(ctx(r) || {}) }, columns.map((c) => {
           const v = c.render ? c.render(r) : c.get ? c.get(r) : r[c.key];
           return h('td', { class: c.wrap ? 'wrap' : null, title: typeof v === 'string' ? v : null }, v);
         }));
@@ -643,6 +968,7 @@
         const tw = h('span', { class: 'tw' + (n.kids ? '' : ' none'), 'aria-hidden': 'true' }, n.kids ? (open ? '−' : '+') : '');
         const btn = h('button', {
           class: 'node' + (path === selPath ? ' sel' : ''), type: 'button', role: 'treeitem', title: n.title || null,
+          'data-node': n.id, 'data-path': path, 'data-kids': n.kids ? '1' : null,
           'aria-expanded': n.kids ? String(open) : null, 'aria-selected': String(path === selPath),
           onclick: (e) => { if (e.target === tw) toggle(path); else navigate(n.id, { path }); },
           ondblclick: (e) => { if (n.kids && e.target !== tw) toggle(path); },
@@ -701,6 +1027,7 @@
       segs.forEach((seg, i) => {
         const path = '/' + segs.slice(0, i + 1).join('/');
         parts.push(h('button', { class: 'crumb' + (i === segs.length - 1 ? ' last' : ''), type: 'button', title: nodeLabel(seg),
+          'data-node': seg, 'data-path': path, 'data-text': S.project.name + ':\\' + segs.slice(1, i + 1).map(crumbLabel).join('\\'),
           onclick: (e) => { e.stopPropagation(); navigate(seg, { path }); } }, i === 0 ? S.project.name : crumbLabel(seg)));
         const here = nodeAt(path);
         if (here && here.node.kids) parts.push(chev(() => (nodeAt(path)?.kids || []).map((k) => ({
@@ -771,7 +1098,7 @@
       if (k === 'project') {
         const flags = (t) => Object.entries(t.flags).filter(([, x]) => x).map(([f]) => humanize(f)).join(', ');
         return {
-          el: listView({ rows: S.schema.types.filter((t) => !q || `${t.plural} ${t.prefix}`.toLowerCase().includes(q)), sortKey: 'project', onOpen: (t) => navigate('type:' + t.prefix),
+          el: listView({ rows: S.schema.types.filter((t) => !q || `${t.plural} ${t.prefix}`.toLowerCase().includes(q)), sortKey: 'project', onOpen: (t) => navigate('type:' + t.prefix), ctx: (t) => ({ 'data-node': 'type:' + t.prefix }),
             columns: [
               { key: 'plural', label: 'Name', render: (t) => cell(typeIcon(t), t.plural) },
               { key: 'prefix', label: 'Prefix' }, { key: 'count', label: 'Items' },
@@ -788,7 +1115,7 @@
       }
       if (k === 'tags') {
         const rows = [...S.tags.entries()].map(([tag, rs]) => ({ tag, count: rs.length, types: [...new Set(rs.map((r) => typeOf(r).plural))].join(', ') })).filter((r) => !q || r.tag.includes(q));
-        return { el: listView({ rows, sortKey: 'tags', onOpen: (r) => navigate('tag:' + r.tag),
+        return { el: listView({ rows, sortKey: 'tags', onOpen: (r) => navigate('tag:' + r.tag), ctx: (r) => ({ 'data-node': 'tag:' + r.tag }),
           columns: [{ key: 'tag', label: 'Tag', render: (r) => cell(['folder'], r.tag) }, { key: 'count', label: 'Items' }, { key: 'types', label: 'Types' }] }), status: `${rows.length} tag(s)` };
       }
       if (k === 'tag') {
@@ -810,7 +1137,7 @@
       }
       if (k === 'docs') {
         const rows = S.docs.filter((d) => !q || `${d.title} ${d.path}`.toLowerCase().includes(q));
-        return { el: listView({ rows, sortKey: 'docs', onOpen: (d) => openDoc(d.root, d.path),
+        return { el: listView({ rows, sortKey: 'docs', onOpen: (d) => openDoc(d.root, d.path), ctx: (d) => ({ 'data-doc-root': d.root, 'data-doc-path': d.path }),
           columns: [{ key: 'title', label: 'Name', render: (d) => cell(d.generated ? 'views' : 'doc', d.title) }, { key: 'path', label: 'File' }, { key: 'generated', label: 'Kind', get: (d) => d.generated ? 'Generated view' : 'Document' }] }),
           status: `${rows.length} document(s); generated views are rendered by szsdlc, never edited by hand` };
       }
@@ -818,6 +1145,9 @@
     }
     search.addEventListener('input', drawPane);
     w.navigate = (n) => navigate(n);
+    w.navigateTo = (n, path) => navigate(n, { path });
+    w.isExpanded = (path) => expanded.has(path);
+    w.toggleNode = (path) => toggle(path);
     // After a refresh: the project's data was reloaded, so draw again in place.
     w.redraw = () => { drawTree(); drawPane(); };  // keeps each item's chosen tab
     navigate(node, { push: false });
@@ -882,7 +1212,7 @@
   function itemPage(row, host) {
     const t = typeOf(row);
     const key = normId(row.id);
-    const root = h('div', { class: 'item-page' }, h('p', { class: 'muted pad' }, `Reading ${row.id}…`));
+    const root = h('div', { class: 'item-page', 'data-item': row.id }, h('p', { class: 'muted pad' }, `Reading ${row.id}…`));
     const pid = S.pid;
     S.api.entity(row.id).then((d) => {
       if (!root.isConnected || S.pid !== pid) return;
@@ -1101,7 +1431,7 @@
       const g = build();
       if (asList) {
         const rows = g.edges.map((e) => ({ ...e, ar: S.byKey.get(e.a), br: S.byKey.get(e.b) }));
-        box.replaceChildren(listView({ sortKey: 'edges', rows, empty: 'No relations.',
+        box.replaceChildren(listView({ sortKey: 'edges', rows, empty: 'No relations.', ctx: (r) => ({ 'data-a': r.a, 'data-b': r.b, 'data-kind': r.kind }),
           columns: [{ key: 'a', label: 'From', render: (r) => r.ar ? cell(typeIcon(typeOf(r.ar)), r.ar.id) : r.a }, { key: 'kind', label: 'Relation', get: (r) => humanize(r.kind) },
             { key: 'b', label: 'To', render: (r) => r.br ? cell(typeIcon(typeOf(r.br)), r.br.id) : h('span', { class: 'bad' }, `${r.b} (not found)`) },
             { key: 'bt', label: 'Title', get: (r) => plain((normId(r.a) === center ? r.br : r.ar)?.title || '') }],
@@ -1153,13 +1483,13 @@
       const tt = 0.78, u = 1 - tt;
       const lx = u * u * u * p0[0] + 3 * u * u * tt * c1[0] + 3 * u * tt * tt * c2[0] + tt * tt * tt * p3[0];
       const ly = u * u * u * p0[1] + 3 * u * u * tt * c1[1] + 3 * u * tt * tt * c2[1] + tt * tt * tt * p3[1];
-      parts.push(`<g class="edge" data-a="${esc(e.a)}" data-b="${esc(e.b)}"><path d="M${p0} C${c1} ${c2} ${p3}" marker-end="url(#${mid})"/></g>`);
+      parts.push(`<g class="edge" data-a="${esc(e.a)}" data-b="${esc(e.b)}" data-kind="${esc(e.kind)}"><path d="M${p0} C${c1} ${c2} ${p3}" marker-end="url(#${mid})"/></g>`);
       const group = `${e.b}|${e.kind}|${Math.sign(cb - ca)}`;
       if (labelled.has(group)) return;
       labelled.add(group);
       const text = humanize(e.kind);
       const tw = text.length * 6 + 8;
-      labels.push(`<g class="elabel" data-a="${esc(e.a)}" data-b="${esc(e.b)}"><rect x="${lx - tw / 2}" y="${ly - 8}" width="${tw}" height="15"/><text x="${lx}" y="${ly + 3}" text-anchor="middle">${esc(text)}</text></g>`);
+      labels.push(`<g class="elabel" data-a="${esc(e.a)}" data-b="${esc(e.b)}" data-kind="${esc(e.kind)}"><rect x="${lx - tw / 2}" y="${ly - 8}" width="${tw}" height="15"/><text x="${lx}" y="${ly + 3}" text-anchor="middle">${esc(text)}</text></g>`);
     });
     parts.push(...labels);
     for (const [k, p] of pos) {
@@ -1204,6 +1534,7 @@
         S.project.code_root ? null : h('span', { class: 'muted' }, 'No code root: out-of-tree paths cannot be opened.')),
       listView({
         sortKey: 'documents', rows: docs, empty: 'No documents.',
+        ctx: (x) => (x.kind === 'entity' ? { 'data-ref': x.entity } : x.kind === 'link' || !x.path ? null : { 'data-doc-root': x.root, 'data-doc-path': x.path }),
         columns: [
           { key: 'name', label: 'Name', render: (x) => cell(iconFor(x), x.name) },
           { key: 'where', label: 'Where', get: (x) => WHERE[x.root] || x.root },
@@ -1237,19 +1568,13 @@
     const label = btn.lastChild.textContent;
     const flash = (msg) => { btn.lastChild.textContent = ' ' + msg; setTimeout(() => { btn.lastChild.textContent = label; }, 1600); };
     try { await navigator.clipboard.writeText(text); flash('Copied'); return; } catch { /* fall back below */ }
-    const ta = h('textarea', { style: { position: 'fixed', left: '-9999px', top: '0' } });
-    ta.value = text; document.body.append(ta); ta.select();
-    let ok = false;
-    try { ok = document.execCommand('copy'); } catch { ok = false; }
-    ta.remove();
-    flash(ok ? 'Copied' : 'Blocked: use Source and select');
+    flash(execCopy(text) ? 'Copied' : 'Blocked: use Source and select');
   }
-  function docBlock({ text, raw, ctx, empty, open, front, title, lead }) {
+  function docBlock({ text, raw, ctx, empty, open, front, title, lead, mode = 'rendered' }) {
     const source = raw ?? text ?? '';
-    let mode = 'rendered';
     const page = h('div', { class: 'page', tabindex: '0' });
-    const bR = h('button', { class: 'tbtn', type: 'button', 'aria-pressed': 'true', onclick: () => set('rendered') }, 'Rendered');
-    const bS = h('button', { class: 'tbtn', type: 'button', 'aria-pressed': 'false', onclick: () => set('source') }, 'Source');
+    const bR = h('button', { class: 'tbtn', type: 'button', 'aria-pressed': String(mode === 'rendered'), onclick: () => set('rendered') }, 'Rendered');
+    const bS = h('button', { class: 'tbtn', type: 'button', 'aria-pressed': String(mode === 'source'), onclick: () => set('source') }, 'Source');
     const copy = h('button', { class: 'tbtn', type: 'button', title: 'Copy the raw Markdown', onclick: (e) => copyText(source, e.currentTarget) }, icon('copy'), ' Copy raw');
     function set(m) { mode = m; bR.setAttribute('aria-pressed', String(m === 'rendered')); bS.setAttribute('aria-pressed', String(m === 'source')); draw(); }
     function draw() {
@@ -1264,15 +1589,17 @@
       page.replaceChildren(inner);
     }
     draw();
-    return h('div', { class: 'docblock' },
+    const block = h('div', { class: 'docblock' },
       h('div', { class: 'toolbar' }, h('span', { class: 'seg' }, bR, bS), copy,
         open ? h('button', { class: 'tbtn', type: 'button', onclick: open }, icon('doc'), ' Open in Document Viewer') : null,
         h('span', { class: 'grow' }), title ? h('span', { class: 'muted ellip' }, title) : null),
       page);
+    block.setMode = set;
+    return block;
   }
 
   // ------------------------------------------------------------- doc viewer
-  async function openDoc(root, path, { fallback = false } = {}) {
+  async function openDoc(root, path, { fallback = false, mode } = {}) {
     const d = await S.api.doc(root, path, fallback);
     if (!d || !d.exists) return missingDoc(root, path);
     const out = d.root !== 'store';
@@ -1280,13 +1607,14 @@
       key: `doc:${d.root}:${d.path}`, title: `${basename(d.path)} - Document Viewer`, icon: out ? ['doc', '#a05000'] : 'doc', width: 720, height: 560, status: true,
       menu: [{ label: 'File', items: () => [d.entity ? { label: `Open ${d.entity}`, action: () => openItem(d.entity) } : null, { label: 'Close', action: () => w.close() }].filter(Boolean) }],
     });
-    if (w.reused) return w;
+    if (w.reused) { if (mode) w.setDocMode?.(mode); return w; }
     const lead = d.entity ? h('p', null, h('button', { class: 'btn', type: 'button', onclick: () => openItem(d.entity) }, icon(typeIcon(typeOf(S.byKey.get(normId(d.entity))))), ` Open ${d.entity}`)) : null;
     w.body.append(
       h('div', { class: 'addr' }, h('span', null, 'Address'), h('div', { class: 'field' }, h('span', { class: 'badge' + (out ? ' out' : '') }, out ? 'Out of tree' : 'In tree'), `${d.root}:/${d.path}`)),
-      d.kind === 'markdown'
-        ? docBlock({ text: d.text, raw: d.raw, ctx: { root: d.root, path: d.path }, front: d.frontmatter, lead })
-        : docBlock({ text: '```\n' + (d.text || '') + '\n```', raw: d.raw ?? d.text, ctx: { root: d.root, path: d.path } }));
+      w.docBlock = d.kind === 'markdown'
+        ? docBlock({ text: d.text, raw: d.raw, ctx: { root: d.root, path: d.path }, front: d.frontmatter, lead, mode })
+        : docBlock({ text: '```\n' + (d.text || '') + '\n```', raw: d.raw ?? d.text, ctx: { root: d.root, path: d.path }, mode }));
+    w.setDocMode = w.docBlock.setMode;
     w.setStatus([d.kind === 'markdown' ? 'GitHub-flavoured Markdown' : 'Plain text', out ? 'Out of tree' : 'In tree', fmtSize(d.size)]);
     return w;
   }
@@ -1432,7 +1760,7 @@
         if (A.x + A.w <= B.x) d = `M${A.x + A.w},${A.y + A.h / 2} C${A.x + A.w + 40},${A.y + A.h / 2} ${B.x - 40},${B.y + B.h / 2} ${B.x - 2},${B.y + B.h / 2}`;
         else if (B.x + B.w <= A.x) d = `M${A.x},${A.y + A.h / 2} C${A.x - 40},${A.y + A.h / 2} ${B.x + B.w + 40},${B.y + B.h / 2} ${B.x + B.w + 2},${B.y + B.h / 2}`;
         else { const x = Math.max(A.x + A.w, B.x + B.w); d = `M${x},${A.y + A.h / 2} C${x + 30},${A.y + A.h / 2} ${x + 30},${B.y + B.h / 2} ${x + 2},${B.y + B.h / 2}`; }
-        out.push(`<path class="dep" data-a="${esc(a)}" data-b="${esc(b)}" d="${d}" marker-end="url(#${mid})"><title>${esc(r.id)} ${esc(humanize(dep))} ${esc(tgt)}</title></path>`);
+        out.push(`<path class="dep" data-a="${esc(a)}" data-b="${esc(b)}" data-kind="${esc(dep)}" d="${d}" marker-end="url(#${mid})"><title>${esc(r.id)} ${esc(humanize(dep))} ${esc(tgt)}</title></path>`);
       }
       overlay.innerHTML = out.join('');
     }
@@ -1551,15 +1879,15 @@
     const desk = document.getElementById('desktop');
     const items = [
       { label: 'My Projects', icon: 'network', open: openProjects },
-      { label: S.project.name, icon: 'computer', open: () => openExplorer('project') },
-      { label: 'Roadmap', icon: 'calendar', open: () => openExplorer('roadmap') },
-      S.tags.size ? { label: 'Tags', icon: 'tag', open: () => openExplorer('tags') } : null,
-      S.schema.types.some((t) => t.flags.intake) ? { label: 'Inbox', icon: 'inbox', open: () => openExplorer('inbox') } : null,
-      { label: 'Views', icon: 'views', open: () => openExplorer('docs') },
-      ...S.schema.types.map((t) => ({ label: t.plural, icon: typeIcon(t), open: () => openExplorer('type:' + t.prefix) })),
-    ].filter(Boolean);
+      { label: S.project.name, icon: 'computer', node: 'project' },
+      { label: 'Roadmap', icon: 'calendar', node: 'roadmap' },
+      S.tags.size ? { label: 'Tags', icon: 'tag', node: 'tags' } : null,
+      S.schema.types.some((t) => t.flags.intake) ? { label: 'Inbox', icon: 'inbox', node: 'inbox' } : null,
+      { label: 'Views', icon: 'views', node: 'docs' },
+      ...S.schema.types.map((t) => ({ label: t.plural, icon: typeIcon(t), node: 'type:' + t.prefix })),
+    ].filter(Boolean).map((it) => (it.node ? { ...it, open: () => openExplorer(it.node) } : it));
     desk.replaceChildren(...items.map((it) => {
-      const b = h('button', { class: 'desk-icon', type: 'button', ondblclick: it.open, onkeydown: (e) => { if (e.key === 'Enter') it.open(); } }, icon(it.icon, 32), h('span', null, it.label));
+      const b = h('button', { class: 'desk-icon', type: 'button', 'data-node': it.node || null, ondblclick: it.open, onkeydown: (e) => { if (e.key === 'Enter') it.open(); } }, icon(it.icon, 32), h('span', null, it.label));
       b.addEventListener('click', () => { desk.querySelectorAll('.sel').forEach((x) => x.classList.remove('sel')); b.classList.add('sel'); if (matchMedia('(pointer: coarse)').matches) it.open(); });
       return b;
     }));
@@ -1608,6 +1936,20 @@
     const m = /^([a-z0-9-]+?)(?:--(.+))?$/.exec(hsh);
     if (m && PROJECTS.some((p) => p.id === m[1])) return { pid: m[1], id: m[2] || null };
     return { pid: null, id: hsh || null };  // a bare `#WI-0029` means the current project
+  }
+  // What a link names after `#<project>--`: an item id, a folder node
+  // (type:EPIC, tag:x, roadmap, inbox, docs, tags, project) or doc:<root>:<path>.
+  function openTarget(target, src) {
+    if (!target) return false;
+    const k = normId(target);
+    if (k && S.byKey.has(k)) { openItem(k, src); return true; }
+    const m = /^doc:([^:]+):(.+)$/.exec(target);
+    if (m) { openDoc(m[1], m[2], { fallback: true }); return true; }
+    const [kind, v] = splitNode(target);
+    const ok = (kind === 'type' && S.types.has(v)) || (kind === 'tag' && S.tags.has(v))
+      || (!v && ['project', 'roadmap', 'docs', 'tags'].includes(kind)) || (target === 'inbox' && S.schema.types.some((t) => t.flags.intake));
+    if (ok) go(target, src);
+    return ok;
   }
   async function loadProject(pid) {
     if (CTX.has(pid)) return CTX.get(pid);
@@ -1857,14 +2199,12 @@
     store.set('project', pid);
     booted = true;
     if (scheduler) { scheduler.setVisible(!document.hidden); scheduler.setInterval(autoRefreshMs()); }
-    const target = normId(want.id);
-    if (target && S.byKey.has(target)) await openItem(target);
+    if (openTarget(want.id)) { /* opened what the link names */ }
     else if (store.get('welcome') !== '0' && innerWidth > 640) openWelcome();
     addEventListener('hashchange', async () => {
       const t = parseHash();
       if (t.pid && t.pid !== S.pid) await switchProject(t.pid, { quiet: !!t.id });
-      const k = normId(t.id);
-      if (k && S.byKey.has(k)) openItem(k);
+      openTarget(t.id);
     });
   }
   boot();
