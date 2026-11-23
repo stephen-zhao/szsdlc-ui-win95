@@ -174,3 +174,68 @@ def test_open_project_over_http_takes_a_repository_url(remote):
     finally:
         server.shutdown()
         server.server_close()
+
+
+# -- Refresh (WI-0048) ------------------------------------------------------
+
+
+def test_refresh_takes_what_arrived_and_sends_nothing(remote, tmp_path):
+    p = Project(remote.as_uri())
+    push_new_epic(remote, tmp_path, "Arrived later")
+    head = subprocess.run(["git", "--git-dir", str(remote), "rev-parse", "main"],
+                          capture_output=True, text=True, check=True).stdout
+    result = p.refresh_from_backend()
+    assert result == {"arrived": True, "replaced": False, "note": None}
+    assert any(e.title == "Arrived later" for e in p.store_model)  # reloaded in place
+    assert subprocess.run(["git", "--git-dir", str(remote), "rev-parse", "main"],
+                          capture_output=True, text=True, check=True).stdout == head
+    assert p.refresh_from_backend()["arrived"] is False
+
+
+def test_refresh_asks_before_replacing_unsent_changes(remote, tmp_path):
+    from szsdlc_ui_win95.errors import UnsentChanges
+
+    p = Project(remote.as_uri())
+    epic = next((p.store / "epics").glob("EPIC-0001-*"))
+    epic.write_text(epic.read_text().replace("Ship the viewer", "Edited here, not sent"), encoding="utf-8")
+    push_new_epic(remote, tmp_path, "Arrived later")
+
+    with pytest.raises(UnsentChanges, match="not yet sent"):
+        p.refresh_from_backend()
+    assert "Edited here, not sent" in epic.read_text()  # untouched
+
+    result = p.refresh_from_backend(replace=True)
+    assert result["arrived"] and result["replaced"]
+    assert result["note"].startswith("kept at refs/szsdlc/replaced/")
+    assert "Edited here, not sent" not in epic.read_text()
+    assert any(e.title == "Arrived later" for e in p.store_model)
+
+
+def test_refresh_from_an_unreachable_remote_replaces_nothing(remote):
+    p = Project(remote.as_uri())
+    shutil.rmtree(remote)
+    with pytest.raises(ProjectError, match="Could not refresh"):
+        p.refresh_from_backend(replace=True)
+    assert len(p.store_model) == 5
+
+
+def test_refresh_over_http_asks_then_replaces(remote, tmp_path):
+    import threading
+    from test_server import call, token
+    from szsdlc_ui_win95.server import make_server
+    registry = Registry()
+    pid = registry.add(remote.as_uri())
+    server = make_server(registry, "127.0.0.1", 0, allow_open=False)  # refreshing opens nothing
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        store = registry.get(pid).store
+        (store / "scratch.md").write_text("unsent", encoding="utf-8")
+        auth = {"X-Viewer-Token": token(server)}
+        status, _, body = call(server, "POST", f"/api/p/{pid}/refresh", {}, auth)
+        assert status == 409 and "not yet sent" in body["detail"]
+        status, _, body = call(server, "POST", f"/api/p/{pid}/refresh", {"replace": True}, auth)
+        assert status == 200 and body["replaced"] and body["project"]["id"] == pid
+        assert not (store / "scratch.md").exists()
+    finally:
+        server.shutdown()
+        server.server_close()

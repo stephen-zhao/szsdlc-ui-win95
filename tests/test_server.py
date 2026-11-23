@@ -117,3 +117,18 @@ def test_no_open_mode_refuses_opening(project):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_refresh_rereads_a_project_kept_here(served):
+    """A project kept in a folder here has nothing to take: Refresh re-reads it."""
+    auth = {"X-Viewer-Token": token(served)}
+    status, _, body = call(served, "POST", "/api/p/proj/refresh", {}, auth)
+    assert status == 200
+    assert body["arrived"] is False and body["replaced"] is False and body["project"]["entity_count"] == 5
+
+
+def test_refresh_is_guarded_like_opening(served):
+    assert call(served, "POST", "/api/p/proj/refresh", {})[0] == 403  # no launch token
+    assert call(served, "POST", "/api/p/proj/refresh", {},
+                {"X-Viewer-Token": token(served), "Origin": "http://evil.example"})[0] == 403
+    assert call(served, "POST", "/api/p/nope/refresh", {}, {"X-Viewer-Token": token(served)})[0] == 404

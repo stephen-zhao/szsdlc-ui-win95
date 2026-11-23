@@ -987,16 +987,16 @@ wheels = [
 
 [[package]]
 name = "zhaostephen-szsdlc"
-version = "0.2.6"
+version = "0.2.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jinja2" },
     { name = "jsonschema" },
     { name = "pyyaml" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3e/c3/7a0040f333378d29f4afbc76dabf48f22eed87fac443a59b6d65681d72e7/zhaostephen_szsdlc-0.2.6.tar.gz", hash = "sha256:af8fa42cc1514cb3003ff7d49693d4602bdaefa3701a25d639d3176eb42ad396", size = 273406, upload-time = "2026-11-22T23:12:29.85Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/91/e4/130fb47678c28ea43bd7470c4da3aad4f1065285b9ae0f60b97a81c8161b/zhaostephen_szsdlc-0.2.12.tar.gz", hash = "sha256:a580edbb1209e40ca41d98dfa8e2c4a4a7c9c8621ddf87b69eff6653c2b40387", size = 287534, upload-time = "2026-11-23T03:53:36.492Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a4/fb/b1d44e7fd0b9c21a0cb5607d655b740a01d286dfa5f2a60144ce6dc6e465/zhaostephen_szsdlc-0.2.6-py3-none-any.whl", hash = "sha256:d67e2ab35088c83f73c33ba65e776fabc0d678fc20252c4ee8e8a3efca04d45c", size = 126971, upload-time = "2026-11-22T23:12:28.473Z" },
+    { url = "https://files.pythonhosted.org/packages/1e/33/4f50f5a9d1867eac251c8b154f878a49585d9d4e82cc8627b30d53630aa3/zhaostephen_szsdlc-0.2.12-py3-none-any.whl", hash = "sha256:ba279e03a23c717f99ab618a9623003b7755632865772e1bd3cc9de7b4a8181c", size = 132376, upload-time = "2026-11-23T03:53:35.398Z" },
 ]
 
 [[package]]
@@ -1024,7 +1024,7 @@ dev = [
 requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
-    { name = "zhaostephen-szsdlc", specifier = ">=0.2.6" },
+    { name = "zhaostephen-szsdlc", specifier = ">=0.2.11" },
 ]
 provides-extras = ["dev"]
 

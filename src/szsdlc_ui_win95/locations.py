@@ -152,3 +152,13 @@ def bring_up_to_date(backend) -> str | None:
         return f"Could not update from where the project is kept ({err}); showing the local copy."
     problem = sz_backend.describe_problem(report)
     return f"Could not update from where the project is kept ({problem}); showing the local copy." if problem else None
+
+
+def refresh(backend):
+    """Make the latest state where the project is kept the current one, through szsdlc.
+
+    szsdlc's own operation: nothing is sent and nothing is merged. It replaces
+    local state that differs without asking, so asking is the caller's job.
+    Returns szsdlc's report.
+    """
+    return sz_backend.refresh(backend)
