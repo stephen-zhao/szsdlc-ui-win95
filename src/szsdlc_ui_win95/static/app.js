@@ -1483,10 +1483,12 @@
 
   // ------------------------------------------------------- settings & about
   const THEMES = [['system', 'Follow my system'], ['light', 'Standard (light)'], ['dark', 'Storm (dark)']];
+  // A scheme picked in Display Properties wins; otherwise the one session configuration chose.
+  const chosenTheme = () => store.get('theme') || META.defaults?.scheme || 'system';
   function applyTheme(v) { if (v === 'light' || v === 'dark') document.documentElement.dataset.theme = v; else delete document.documentElement.dataset.theme; }
   function openDisplay() {
     const w = openWindow({ title: 'Display Properties', dialog: true, width: 340 });
-    const cur = store.get('theme') || 'system';
+    const cur = chosenTheme();
     w.body.append(h('fieldset', null, h('legend', null, 'Scheme'), THEMES.map(([v, label]) => h('label', { class: 'row', style: { padding: '2px 0' } },
       h('input', { type: 'radio', name: 'szv-theme', id: 'szv-theme-' + v, value: v, checked: v === cur || null, onchange: () => { store.set('theme', v); applyTheme(v); } }), label))),
     h('div', { class: 'row end' }, h('button', { class: 'btn default', type: 'button', onclick: () => w.close() }, 'OK')));
@@ -1718,6 +1720,7 @@
       messageBox({ kind: 'error', title: 'szsdlc Viewer', text: ['The viewer could not reach its local service.', String(err.message || err)] });
       return;
     }
+    applyTheme(chosenTheme());
     if (!PROJECTS.length) { openProjects(); return; }
     const want = parseHash();
     const remembered = store.get('project');

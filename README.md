@@ -48,6 +48,37 @@ Opening a project it already has brings a clone up to date, but only when that
 clone has nothing unsent; otherwise the clone is shown as it is. Viewing never
 writes to a project.
 
+## Configuration
+
+Settings for how the viewer runs live in a TOML file that you edit yourself.
+The viewer reads it once at startup, never writes it, and offers no way to
+change it, so a change takes effect on the next start.
+
+| Platform | File |
+|---|---|
+| Linux and others | `$XDG_CONFIG_HOME/szsdlc-ui-win95/config.toml` (else `~/.config/…`) |
+| macOS | `~/Library/Application Support/szsdlc-ui-win95/config.toml` |
+| Windows | `%APPDATA%\szsdlc-ui-win95\config.toml` |
+
+`--config FILE` reads another file instead. Every key is optional:
+
+```toml
+host = "127.0.0.1"      # --host
+port = 8095             # --port; 0 picks a free one
+open_project = true     # false is --no-open
+exclude = ["vendor"]    # --exclude: directory names to skip
+
+[ui]
+scheme = "system"       # system, light or dark: what a browser shows until
+                        # someone picks a scheme in Display Properties
+```
+
+A flag on the command line wins over the file, and the file wins over the
+built-in default; `--exclude` replaces the file's list rather than adding to it.
+With no file, the defaults apply. A file that cannot be read, or has an
+unknown key or a wrong value, stops the viewer from starting, with a message
+naming the file, the key and the fix. Startup prints which file it read.
+
 ## What it does
 
 - **One viewer, many projects.** A project button on the taskbar switches

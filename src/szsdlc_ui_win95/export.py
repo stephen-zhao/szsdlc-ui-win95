@@ -18,18 +18,18 @@ from .server import STATIC, meta
 VENDOR = ("marked.umd.js", "purify.min.js")
 
 
-def snapshot(registry: Registry) -> dict:
+def snapshot(registry: Registry, *, scheme: str = "system") -> dict:
     return {
         "generated_at": _dt.date.today().isoformat(),
-        "meta": meta(),
+        "meta": meta(scheme),
         "projects": [registry.summary(pid, p, public=True) for pid, p in registry.projects.items()],
         "data": {pid: p.snapshot() for pid, p in registry.projects.items()},
     }
 
 
-def render(registry: Registry, *, fragment: bool = False) -> str:
+def render(registry: Registry, *, fragment: bool = False, scheme: str = "system") -> str:
     """The page as one HTML string. `fragment` drops the document skeleton, for hosts that supply their own."""
-    data = json.dumps(snapshot(registry), ensure_ascii=False).replace("</", "<\\/")
+    data = json.dumps(snapshot(registry, scheme=scheme), ensure_ascii=False).replace("</", "<\\/")
     html = (STATIC / "index.html").read_text(encoding="utf-8")
     css = (STATIC / "win95.css").read_text(encoding="utf-8")
     js = (STATIC / "app.js").read_text(encoding="utf-8")
@@ -43,7 +43,7 @@ def render(registry: Registry, *, fragment: bool = False) -> str:
                         f"<script>{vendor}</script>\n<script>window.SZ_SNAPSHOT={data};</script>\n<script>{js}</script>")
 
 
-def write(registry: Registry, out: Path, *, fragment: bool = False) -> Path:
+def write(registry: Registry, out: Path, *, fragment: bool = False, scheme: str = "system") -> Path:
     out = Path(out)
-    out.write_text(render(registry, fragment=fragment), encoding="utf-8")
+    out.write_text(render(registry, fragment=fragment, scheme=scheme), encoding="utf-8")
     return out

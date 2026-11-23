@@ -9,7 +9,7 @@ from pathlib import Path
 
 import szsdlc
 
-from . import __version__, export
+from . import __version__, config, export
 from .project import ProjectError
 from .registry import Registry
 from .server import make_server
@@ -30,11 +30,14 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--registered", action="store_true", help="also open every store szsdlc keeps elsewhere")
     ap.add_argument("--projects-file", metavar="FILE",
                     help="YAML list of {location, code_root}: read at start, rewritten when a project is opened")
+    ap.add_argument("--config", metavar="FILE",
+                    help=f"session configuration to read (default: {config.default_path()})")
     ap.add_argument("--no-open", action="store_true", help="refuse File > Open project from the browser")
-    ap.add_argument("--host", default="127.0.0.1", help="interface to bind (default: loopback only)")
-    ap.add_argument("--port", type=int, default=8095, help="port (0 picks a free one; default 8095)")
+    ap.add_argument("--host", help="interface to bind (default: loopback only)")
+    ap.add_argument("--port", type=int, help="port (0 picks a free one; default 8095)")
     ap.add_argument("--open", action="store_true", help="open a browser once serving")
-    ap.add_argument("--exclude", action="append", default=[], metavar="DIR", help="directory name to skip (repeatable)")
+    ap.add_argument("--exclude", action="append", metavar="DIR",
+                    help="directory name to skip (repeatable; replaces the configured list)")
     ap.add_argument("--export", metavar="OUT.html", help="write a static, self-contained snapshot and exit")
     ap.add_argument("--fragment", action="store_true", help="with --export: omit the HTML document skeleton")
     ap.add_argument("--verbose", action="store_true", help="log every request")
@@ -44,7 +47,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-    registry = Registry(args.exclude, Path(args.projects_file).expanduser() if args.projects_file else None)
+    try:
+        settings = config.load(args.config)
+    except config.ConfigError as err:
+        print(f"szsdlc-ui-win95: cannot start: {err}", file=sys.stderr)
+        return 2
+    # A flag given on the command line wins, then the file, then the default.
+    host = args.host if args.host is not None else settings.host
+    port = args.port if args.port is not None else settings.port
+    exclude = args.exclude if args.exclude is not None else list(settings.exclude)
+    allow_open = settings.open_project and not args.no_open
+
+    registry = Registry(exclude, Path(args.projects_file).expanduser() if args.projects_file else None)
     registry.load()
     if args.registered:
         registry.add_registered()
@@ -60,19 +74,20 @@ def main(argv=None) -> int:
         if not registry.projects:
             print("szsdlc-ui-win95: no project to export", file=sys.stderr)
             return 2
-        out = export.write(registry, Path(args.export), fragment=args.fragment)
+        out = export.write(registry, Path(args.export), fragment=args.fragment, scheme=settings.scheme)
         print(f"wrote {out} ({out.stat().st_size // 1024} KiB, {len(registry.projects)} project(s))")
         return 0
 
     try:
-        server = make_server(registry, args.host, args.port, allow_open=not args.no_open, verbose=args.verbose)
+        server = make_server(registry, host, port, allow_open=allow_open, scheme=settings.scheme, verbose=args.verbose)
     except OSError as err:
-        print(f"szsdlc-ui-win95: cannot listen on {args.host}:{args.port}: {err.strerror or err}. "
+        print(f"szsdlc-ui-win95: cannot listen on {host}:{port}: {err.strerror or err}. "
               "Try --port 0 for any free port.", file=sys.stderr)
         return 1
-    host = "localhost" if args.host in ("127.0.0.1", "::1") else args.host
-    url = f"http://{host}:{server.server_port}/"
+    shown = "localhost" if host in ("127.0.0.1", "::1") else host
+    url = f"http://{shown}:{server.server_port}/"
     print(f"szsdlc-ui-win95 {__version__} (szsdlc {szsdlc.__version__}): {len(registry.projects)} project(s)")
+    print(f"  config: {settings.source}" if settings.source else "  config: none found, using defaults")
     for pid, p in registry.projects.items():
         print(f"  {pid:<24} {p.store}  ({len(p.store_model)} entities; code root: {p.code_root or 'none'})")
         if p.update_warning:

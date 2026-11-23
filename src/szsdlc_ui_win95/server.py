@@ -47,8 +47,10 @@ TOKEN_META = b'<meta name="viewer-token" content="">'
 MAX_BODY = 65536
 
 
-def meta() -> dict:
-    return {"viewer": "szsdlc-ui-win95", "version": __version__, "szsdlc_version": szsdlc.__version__, "readonly": True}
+def meta(scheme: str = "system") -> dict:
+    """Versions, and the defaults session configuration chose for an unconfigured browser."""
+    return {"viewer": "szsdlc-ui-win95", "version": __version__, "szsdlc_version": szsdlc.__version__, "readonly": True,
+            "defaults": {"scheme": scheme}}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -57,6 +59,7 @@ class Handler(BaseHTTPRequestHandler):
     allowed_hosts: frozenset[str] = frozenset()
     token: str = ""
     allow_open: bool = True
+    scheme: str = "system"
     verbose: bool = False
 
     def log_message(self, fmt, *args):
@@ -136,7 +139,7 @@ class Handler(BaseHTTPRequestHandler):
         url = urlparse(self.path)
         q = {k: v[0] for k, v in parse_qs(url.query).items()}
         if url.path == "/api/meta":
-            return self._json(meta())
+            return self._json(meta(self.scheme))
         if url.path == "/api/projects":
             return self._json(self.registry.listing())
         if url.path.startswith("/api/p/"):
@@ -197,13 +200,14 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def make_server(registry: Registry, host: str = "127.0.0.1", port: int = 8095, *,
-                allow_open: bool = True, verbose: bool = False) -> ThreadingHTTPServer:
+                allow_open: bool = True, scheme: str = "system", verbose: bool = False) -> ThreadingHTTPServer:
     """A configured server, not yet serving. Port 0 picks a free port."""
     handler = type("BoundHandler", (Handler,), {
         "registry": registry,
         "allowed_hosts": frozenset({"127.0.0.1", "localhost", "::1", host}),
         "token": secrets.token_urlsafe(24),
         "allow_open": allow_open,
+        "scheme": scheme,
         "verbose": verbose or bool(os.environ.get("SZUI_LOG")),
     })
     server = ThreadingHTTPServer((host, port), handler)

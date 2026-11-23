@@ -41,7 +41,8 @@ def token(server):
 
 
 def test_meta_projects_and_project_routes(served):
-    assert call(served, "GET", "/api/meta")[2]["viewer"] == "szsdlc-ui-win95"
+    meta = call(served, "GET", "/api/meta")[2]
+    assert meta["viewer"] == "szsdlc-ui-win95" and meta["defaults"] == {"scheme": "system"}
     projects = call(served, "GET", "/api/projects")[2]
     assert [p["id"] for p in projects] == ["proj"]
     assert call(served, "GET", "/api/p/proj/project")[2]["entity_count"] == 5
@@ -114,6 +115,7 @@ def test_no_open_mode_refuses_opening(project):
     try:
         status = call(server, "POST", "/api/projects", {"store": "/"}, {"X-Viewer-Token": token(server)})[0]
         assert status == 403
+        assert call(server, "GET", "/api/meta")[2]["defaults"] == {"scheme": "system"}
     finally:
         server.shutdown()
         server.server_close()

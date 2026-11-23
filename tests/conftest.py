@@ -1,7 +1,8 @@
 """Fixture projects are built with szsdlc's own CLI, so they are always valid ones.
 
 Every test runs with szsdlc's per-user state (settings and the store registry)
-redirected into a temporary directory, so nothing on the machine leaks in.
+and the viewer's session configuration redirected into temporary directories,
+so nothing on the machine leaks in.
 """
 
 from __future__ import annotations
@@ -24,6 +25,16 @@ def isolated_szsdlc(tmp_path_factory, monkeypatch):
         if key.startswith("SZSDLC_"):
             monkeypatch.delenv(key)
     return home
+
+
+@pytest.fixture(autouse=True)
+def isolated_config(tmp_path_factory, monkeypatch):
+    """The viewer's own session configuration is looked for in a temporary directory, never the real one."""
+    from szsdlc_ui_win95 import config
+
+    path = tmp_path_factory.mktemp("viewer-config") / config.FILENAME
+    monkeypatch.setattr(config, "default_path", lambda: path)
+    return path
 
 
 def szsdlc(project: Path, *args: str) -> str:
