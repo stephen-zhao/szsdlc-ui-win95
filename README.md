@@ -55,8 +55,9 @@ folder here is simply read again. If the copy holds changes that were never
 sent, Refresh asks before replacing them, and szsdlc keeps what it replaces.
 
 The project on screen also **refreshes itself in the background**, every minute
-by default (Display settings → Update automatically: Off, 30 seconds, 1 minute
-or 5 minutes, per browser). It only runs while the tab is visible, and a project
+by default. The ▾ beside the Refresh button sets how often (Off, 30 seconds, 1
+minute or 5 minutes, per browser, the same in every window) and shows it, `1m`,
+while it is on. It only runs while the tab is visible, and a project
 you switch to is refreshed once on arrival. A background refresh never replaces
 unsent changes: it skips the project and says so in the status bar. It redraws
 only when something arrived, and never in the middle of a drag, an open menu or
