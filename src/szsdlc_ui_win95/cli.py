@@ -27,7 +27,10 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("projects", nargs="*", metavar="LOCATION[::CODE_ROOT]",
                     help="projects to serve: a folder inside one, or where a backend keeps one, "
                          "such as a git URL (default: the current directory)")
-    ap.add_argument("--registered", action="store_true", help="also open every store szsdlc keeps elsewhere")
+    ap.add_argument("--registered", action=argparse.BooleanOptionalAction, default=True,
+                    help="open every store szsdlc keeps elsewhere, beside the projects named "
+                         "(default: on; --no-registered opens only those named, or the current "
+                         "directory). Never applies to --export")
     ap.add_argument("--projects-file", metavar="FILE",
                     help="YAML list of {location, code_root}: read at start, rewritten when a project is opened")
     ap.add_argument("--no-open", action="store_true", help="refuse File > Open project from the browser")
@@ -42,19 +45,36 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def main(argv=None) -> int:
-    args = build_parser().parse_args(argv)
+def open_projects(args: argparse.Namespace) -> Registry:
+    """Every project this launch serves, or exports.
+
+    The projects file first, then every store szsdlc keeps elsewhere (unless
+    `--no-registered`, and never for `--export`: a snapshot holds only what the
+    command line names), then the projects named, or the current directory.
+
+    The current directory opens beside the others whenever it is inside a
+    project. As the implicit default it is skipped quietly when something else
+    already opened; a location someone named, or `.` when nothing else opened,
+    still says why it was skipped.
+    """
     registry = Registry(args.exclude, Path(args.projects_file).expanduser() if args.projects_file else None)
     registry.load()
-    if args.registered:
+    if args.registered and not args.export:
         registry.add_registered()
-    entries = args.projects or ([] if registry.projects else ["."])
-    for entry in entries:
+    implicit = not args.projects
+    for entry in args.projects or ["."]:
         location, code = parse_project(entry)
         try:
             registry.add(location, code)
         except ProjectError as err:
-            print(f"szsdlc-ui-win95: skipped {entry}: {err}", file=sys.stderr)
+            if not (implicit and registry.projects):
+                print(f"szsdlc-ui-win95: skipped {entry}: {err}", file=sys.stderr)
+    return registry
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    registry = open_projects(args)
 
     if args.export:
         if not registry.projects:

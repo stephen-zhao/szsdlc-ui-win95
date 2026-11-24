@@ -17,17 +17,27 @@ Needs Python 3.12+.
 ```sh
 pip install zhaostephen-szsdlc-ui-win95     # or: uv tool install zhaostephen-szsdlc-ui-win95
 
-cd my-project && szsdlc-ui-win95 --open      # the project you are standing in
+cd my-project && szsdlc-ui-win95 --open      # this project, and every one szsdlc keeps elsewhere
 ```
 
 It serves `http://localhost:8095/`, on loopback only, and never writes to a
-project. Other ways to run it:
+project.
+
+**What opens by default:** every store szsdlc keeps elsewhere (git-kept clones
+and `dir` stores it has registered), plus the project you are standing in, if
+any. Projects named on the command line open beside the registered ones.
+`--no-registered` opens only the projects named, or the current directory. A
+plain folder opened with File → Open project… is still forgotten on restart
+unless you use `--projects-file`. `--export` never adds registered stores: a
+snapshot holds only what the command line names.
+
+Other ways to run it:
 
 ```sh
 szsdlc-ui-win95 ~/code/app ~/code/lab                 # several projects in one viewer
 szsdlc-ui-win95 https://github.com/org/tracker.git    # a project kept in a git repository
 szsdlc-ui-win95 ~/sdlc-store::~/code/app              # resolve out-of-tree docs against ~/code/app
-szsdlc-ui-win95 --registered                          # every store szsdlc keeps elsewhere
+szsdlc-ui-win95 --no-registered                       # only the current project, not the registered stores
 szsdlc-ui-win95 --projects-file ~/.config/szsdlc/viewer.yml   # remembered projects
 szsdlc-ui-win95 ~/code/app --export app.html          # one self-contained HTML snapshot
 szsdlc-ui-win95 --port 0                              # any free port
