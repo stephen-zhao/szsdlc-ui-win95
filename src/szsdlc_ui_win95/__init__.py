@@ -4,6 +4,6 @@ The frontend renders from a schema descriptor built from szsdlc's resolved
 config, so it names no entity type. Design: SPK-0005 in szsdlc-szsdlc.
 """
 
-__version__ = "0.1.7"
+__version__ = "0.1.8"
 
 __all__ = ["__version__"]
