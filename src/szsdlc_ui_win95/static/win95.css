@@ -202,8 +202,14 @@ a, .link { color: var(--link); text-decoration: underline; cursor: pointer; back
 .tbtn:active:not(:disabled), .tbtn[aria-pressed="true"] { box-shadow: var(--pressed); background: var(--face-hi); }
 .tbtn:disabled { color: var(--ink-dim); }
 .tbtn:disabled svg { opacity: .35; filter: grayscale(1); }
-/* Refresh and its interval ▾, one split button. */
-.split { display: inline-flex; }
+/* Refresh and its interval ▾, one split button: one raised frame, an etched
+   divider, and each half pressing on its own. Its own class, because a layout
+   class (`.split` is the tree-and-pane container) brings `flex: 1` and a gap. */
+.btn-group { display: inline-flex; flex: none; gap: 0; background: var(--face); box-shadow: var(--thin-out); }
+/* Transparent, so the group's frame (an inset shadow) is not painted over. */
+.btn-group > .tbtn { box-shadow: none; background: transparent; }
+.btn-group > .tbtn + .tbtn { box-shadow: inset 1px 0 var(--lo), inset 2px 0 var(--hi); padding-left: 5px; }
+.btn-group > .tbtn:active:not(:disabled), .btn-group > .tbtn[aria-expanded="true"] { box-shadow: var(--pressed); background: var(--face-hi); }
 .tbtn.interval { padding: 0 3px; gap: 2px; min-width: 14px; justify-content: center; }
 .tbtn.interval .ival { font-size: 11px; }
 .tbtn.interval .caret { font-size: 9px; }
