@@ -189,6 +189,9 @@ def test_the_api_describes_itself(served):
     status, _, body = call(served, "GET", "/api/openapi.json")
     assert status == 200
     assert {"/api/meta", "/api/projects", "/api/p/{pid}/refresh"} <= set(body["paths"])
+    opened = body["paths"]["/api/projects"]["post"]
+    assert "location" in opened["requestBody"]["content"]["application/json"]["schema"]["properties"]
+    assert opened["responses"]["201"]["content"]["application/json"]["schema"]["$ref"].endswith("OpenProjectResponse")
     assert call(served, "GET", "/docs")[0] == 404  # no Swagger page: it would load scripts from a CDN
 
 
