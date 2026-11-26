@@ -163,10 +163,12 @@ def test_edits_to_a_clone_are_unsent_until_sent(remote, tmp_path):  # noqa: F811
 
 
 @pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
-def test_unsent_changes_made_outside_the_viewer_are_named(remote):  # noqa: F811
+def test_unsent_changes_made_outside_the_viewer_are_named(remote, monkeypatch):  # noqa: F811
     registry = Registry()
     pid = registry.add(remote.as_uri())
     project = registry.get(pid)
+    # An agent in a Claude Code turn: szsdlc commits, and sending waits for the turn's end.
+    monkeypatch.setenv("CLAUDECODE", "1")
     szsdlc(project.sdlc_root, "tag", "WI-0002", "cli")
     assert ViewerService(registry).changes(pid) == {"unsent": True, "edits": [], "outside": True}
 
