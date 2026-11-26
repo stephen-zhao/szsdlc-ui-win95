@@ -8,7 +8,8 @@ import pytest
 
 from conftest import szsdlc
 from szsdlc_ui_win95.registry import Registry
-from szsdlc_ui_win95.server import make_server
+from szsdlc_ui_win95 import __version__
+from szsdlc_ui_win95.server import CSP, make_server
 
 
 @pytest.fixture
@@ -38,7 +39,7 @@ def call(server, method, path, body=None, headers=None, host=None):
 
 
 def token(server):
-    return server.RequestHandlerClass.token
+    return server.token
 
 
 def test_meta_projects_and_project_routes(served):
@@ -146,3 +147,67 @@ def test_a_refresh_that_changes_nothing_does_not_reload(project):
     szsdlc(project, "new", "epic", "--title", "Edited on disk")  # a file changed: that is reloaded
     p.refresh_from_backend()
     assert p.store_model is not model and any(e.title == "Edited on disk" for e in p.store_model)
+
+
+# ---------------------------------------------------------------- FastAPI (WI-0070)
+
+def test_head_answers_with_headers_and_no_body(served):
+    for path in ("/", "/api/meta", "/api/p/proj/project"):
+        conn = http.client.HTTPConnection("127.0.0.1", served.server_port, timeout=10)
+        conn.request("HEAD", path, headers={"Host": f"localhost:{served.server_port}"})
+        resp = conn.getresponse()
+        assert resp.status == 200 and resp.read() == b"", path
+        assert int(resp.getheader("Content-Length")) > 0, path  # the GET's length, without its body
+        assert resp.getheader("Content-Security-Policy") == CSP
+        conn.close()
+
+
+def test_every_response_is_hardened_and_names_the_viewer(served):
+    for method, path, host in (("GET", "/api/meta", None), ("GET", "/api/bogus", None),
+                               ("GET", "/missing.js", None), ("GET", "/api/meta", "evil.example"),
+                               ("POST", "/api/projects", None)):
+        _, resp, _ = call(served, method, path, {} if method == "POST" else None, host=host)
+        assert resp.getheader("Server") == f"szsdlc-ui-win95/{__version__}", (method, path)
+        assert resp.getheader("X-Content-Type-Options") == "nosniff"
+        assert resp.getheader("Referrer-Policy") == "no-referrer"
+        assert resp.getheader("Content-Security-Policy") == CSP
+        assert "uvicorn" not in (resp.getheader("Server") or "")
+
+
+def test_errors_are_problems_never_framework_shapes(served):
+    auth = {"X-Viewer-Token": token(served)}
+    status, resp, body = call(served, "POST", "/api/p/proj/refresh", {"replace": "yes"}, auth)
+    assert status == 400 and resp.getheader("Content-Type") == "application/problem+json"
+    assert body["title"] == "Not a valid request"
+    status, resp, body = call(served, "POST", "/api/projects", {"location": 5}, auth)
+    assert status == 400 and body["title"] == "Not a valid request"
+    status, resp, _ = call(served, "GET", "/api/projects/")  # no trailing-slash redirect
+    assert status == 404 and resp.getheader("Content-Type") == "application/problem+json"
+
+
+def test_the_api_describes_itself(served):
+    status, _, body = call(served, "GET", "/api/openapi.json")
+    assert status == 200
+    assert {"/api/meta", "/api/projects", "/api/p/{pid}/refresh"} <= set(body["paths"])
+    opened = body["paths"]["/api/projects"]["post"]
+    assert "location" in opened["requestBody"]["content"]["application/json"]["schema"]["properties"]
+    assert opened["responses"]["201"]["content"]["application/json"]["schema"]["$ref"].endswith("OpenProjectResponse")
+    assert call(served, "GET", "/docs")[0] == 404  # no Swagger page: it would load scripts from a CDN
+
+
+def test_a_busy_port_is_refused_before_serving(served, project):
+    with pytest.raises(OSError):
+        make_server(Registry(), "127.0.0.1", served.server_port)
+
+
+def test_http_server_is_no_longer_used():
+    import ast
+    from pathlib import Path
+
+    import szsdlc_ui_win95
+
+    for path in Path(szsdlc_ui_win95.__file__).parent.glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                     else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            assert not any(n == "http.server" for n in names), path

@@ -47,6 +47,29 @@ and capture rather than discuss and forget.
 5. **No build step.** The frontend stays plain HTML, CSS and JS. Third-party
    code is vendored with its licence, never fetched at runtime.
 
+## Layers and naming (standard practice)
+
+These apply to new code now, and existing code moves to them gradually.
+
+**Layers.** The first split is by layer, the second by domain.
+- **Onion order, inside out:**
+  1. **The core:** the model and services, with no IO-framework dependencies. Today the model is `errors`, `documents`, `locations`, `project` and `registry` (they read projects through szsdlc), and the services are `services/`: what the viewer does, as plain Python.
+  2. **The interfaces:** IO-touching code and interface types: `web/` (FastAPI, and its request and response types) and `export.py`.
+  3. **The composition root,** which wires the layers together: `server.py` (with `cli.py` as the command on top).
+- **A strict DAG between layers:** a layer imports only layers inside it.
+- **Inside a layer,** files are split by domain and may import one another.
+- **The check:** `tests/test_layers.py` holds both rules, and fails if anything outside `web/` imports FastAPI, Starlette, uvicorn or pydantic.
+
+**Dependency injection is framework-agnostic.**
+- **Constructor injection:** dependencies arrive through constructors (for example, `ViewerService(registry, allow_open=…)`), and the composition root builds them.
+- **Framework injection stays at the edge:** a framework's own injection may be used only inside that framework's layer. FastAPI's `Depends` lives in `web/` and never reaches the services or the core.
+
+**Middleware.** Avoid Starlette's `BaseHTTPMiddleware`.
+- **First choice:** a `Depends` dependency.
+- **Otherwise,** where a dependency can't do it or would be awkward, write raw ASGI middleware. For example, `web/asgi.py` hardens every response, which must include 404s and the API description.
+
+**Names.** An interface's request and response types are its **wire model**, kept in a `wire_model` module (`web/wire_model.py`), not "DTOs"; translating between it and the service lives in `map_requests` and `map_responses`, so the routes stay routes. Operation `Foo` takes a `FooRequest` and returns a `FooResponse` (`OpenProjectRequest`, `RefreshResponse`, `ListProjectsResponse`). A type nested inside them is named for what it is (`ProjectSummary`).
+
 ## Layout
 
 | Path | Role |
@@ -55,7 +78,9 @@ and capture rather than discuss and forget.
 | `src/szsdlc_ui_win95/locations.py` | Any location to a materialized backend, through szsdlc |
 | `src/szsdlc_ui_win95/documents.py` | Document references, root containment, reading |
 | `src/szsdlc_ui_win95/registry.py` | The projects one viewer serves |
-| `src/szsdlc_ui_win95/server.py` | HTTP: static files and the JSON API, with its hardening |
+| `src/szsdlc_ui_win95/services/` | The viewer's operations, framework-free: `ViewerService` and its typed refusals |
+| `src/szsdlc_ui_win95/web/` | HTTP: the FastAPI routes (`app.py`), the wire model (`wire_model.py`), the mappers between HTTP and the service (`map_requests.py` in: the write guard, validation, service arguments; `map_responses.py` out: JSON and problems), the hardening middleware (`asgi.py`) and the uvicorn server (`server.py`) |
+| `src/szsdlc_ui_win95/server.py` | The composition root: the service, the web app and the server, wired together |
 | `src/szsdlc_ui_win95/export.py` | The static snapshot |
 | `src/szsdlc_ui_win95/cli.py` | The `szsdlc-ui-win95` command |
 | `src/szsdlc_ui_win95/static/` | The frontend |
