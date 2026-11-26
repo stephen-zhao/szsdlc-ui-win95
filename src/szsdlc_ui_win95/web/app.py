@@ -2,39 +2,27 @@
 
 from __future__ import annotations
 
-import json
 import mimetypes
-import secrets
 from http import HTTPStatus
 from importlib import resources
 from pathlib import Path
-from urllib.parse import urlparse
 
 from fastapi import Depends, FastAPI, Request
-from pydantic import ValidationError
-from starlette.responses import Response
 
 from .. import __version__
 from ..services import ServiceError, ViewerService
 from .asgi import Harden
+from .map_requests import body_schema, open_project_args, query, refresh_args, write_guard
+from .map_responses import Refused, problem, refusal, send, send_json
 from .wire_model import (ListProjectsResponse, MetaResponse, OpenProjectRequest, OpenProjectResponse,
-                   RefreshRequest, RefreshResponse)
-from .responses import problem, refusal, send, send_json
+                         RefreshRequest, RefreshResponse)
 
 STATIC = Path(str(resources.files("szsdlc_ui_win95") / "static")).resolve()
 CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
        "script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")
 TOKEN_META = b'<meta name="viewer-token" content="">'
-MAX_BODY = 65536
 HEADERS = {"Server": f"szsdlc-ui-win95/{__version__}", "X-Content-Type-Options": "nosniff",
            "Referrer-Policy": "no-referrer", "Content-Security-Policy": CSP}
-
-
-class Refused(Exception):
-    """Raised by the write guard; answered with its problem."""
-
-    def __init__(self, response: Response):
-        self.response = response
 
 
 def create_app(service: ViewerService, *, allowed_hosts: frozenset[str], token: str) -> FastAPI:
@@ -51,37 +39,7 @@ def create_app(service: ViewerService, *, allowed_hosts: frozenset[str], token: 
     async def service_refused(request: Request, exc: ServiceError):
         return refusal(exc)
 
-    async def write_body(request: Request) -> dict:
-        """Every write: same origin, this launch's token, a small JSON body. In that order."""
-        origin = request.headers.get("origin")
-        if origin and urlparse(origin).hostname not in allowed_hosts:
-            raise Refused(problem(HTTPStatus.FORBIDDEN, "Cross-origin request",
-                                  "Requests must come from the viewer's own page."))
-        if not secrets.compare_digest(request.headers.get("x-viewer-token", ""), token):
-            raise Refused(problem(HTTPStatus.FORBIDDEN, "Missing launch token",
-                                  "Reload the viewer page to pick up this launch's token."))
-        too_large = problem(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Body too large", "Bodies are limited to 64 KiB.")
-        if int(request.headers.get("content-length") or 0) > MAX_BODY:
-            raise Refused(too_large)
-        raw = await request.body()
-        if len(raw) > MAX_BODY:
-            raise Refused(too_large)
-        try:
-            body = json.loads(raw or b"{}")
-        except ValueError:
-            raise Refused(problem(HTTPStatus.BAD_REQUEST, "Not JSON", "Send a JSON object.")) from None
-        return body if isinstance(body, dict) else {}
-
-    def validated(model, body: dict):
-        try:
-            return model.model_validate(body)
-        except ValidationError as err:
-            raise Refused(problem(HTTPStatus.BAD_REQUEST, "Not a valid request",
-                                  str(err).splitlines()[0])) from None
-
-    def body_schema(model) -> dict:
-        """Describe a request body the write guard reads raw, so it still appears in the API description."""
-        return {"requestBody": {"required": False, "content": {"application/json": {"schema": model.model_json_schema()}}}}
+    write_body = write_guard(allowed_hosts, token)
 
     def read(path: str, **kwargs):
         """A GET route, answering HEAD too: FastAPI routes GET alone. HEAD stays out of the schema."""
@@ -103,8 +61,7 @@ def create_app(service: ViewerService, *, allowed_hosts: frozenset[str], token: 
     @read("/api/p/{pid}/{route:path}")
     def project_route(pid: str, route: str, request: Request):
         def q(key: str, default: str = "") -> str:
-            values = request.query_params.getlist(key)
-            return values[0] if values else default
+            return query(request, key, default)
 
         if route == "project":
             return send_json(service.info(pid))
@@ -137,15 +94,12 @@ def create_app(service: ViewerService, *, allowed_hosts: frozenset[str], token: 
               openapi_extra=body_schema(OpenProjectRequest))
     def open_project(body: dict = Depends(write_body)):
         service.ensure_can_open()  # --no-open is refused before the body is looked at
-        asked = validated(OpenProjectRequest, body)
-        return send_json(service.open_project(asked.location or asked.store or "", asked.code_root),
-                         HTTPStatus.CREATED)
+        return send_json(service.open_project(*open_project_args(body)), HTTPStatus.CREATED)
 
     @app.post("/api/p/{pid}/refresh", response_model=RefreshResponse, openapi_extra=body_schema(RefreshRequest))
     def refresh(pid: str, body: dict = Depends(write_body)):
         service.known(pid)  # an unknown project is named before a bad body
-        asked = validated(RefreshRequest, body)
-        return send_json(service.refresh(pid, replace=asked.replace))
+        return send_json(service.refresh(pid, replace=refresh_args(body)))
 
     @app.post("/{path:path}", include_in_schema=False)
     def post_unknown(request: Request, body: dict = Depends(write_body)):
