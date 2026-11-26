@@ -105,8 +105,9 @@ project is kept.
 
 ## API
 
-The server is a thin, read-only JSON API over szsdlc; see the docstring of
-[`server.py`](src/szsdlc_ui_win95/server.py) for the routes. The centrepiece is
+The server is a thin JSON API over szsdlc, served by FastAPI on uvicorn; see
+the docstring of [`server.py`](src/szsdlc_ui_win95/server.py) for the routes,
+or `/api/openapi.json` on a running viewer for the API described. The centrepiece is
 `/api/p/<project>/schema`, the **schema descriptor**: each type's flags, fields,
 workflow (states with `terminal`, `abandoned` and gates), artifacts, derived
 attributes and relations, as szsdlc resolved them.
