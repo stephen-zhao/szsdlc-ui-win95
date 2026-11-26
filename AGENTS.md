@@ -68,7 +68,7 @@ These apply to new code now, and existing code moves to them gradually.
 - **First choice:** a `Depends` dependency.
 - **Otherwise,** where a dependency can't do it or would be awkward, write raw ASGI middleware. For example, `web/asgi.py` hardens every response, which must include 404s and the API description.
 
-**Names.** Operation `Foo` takes a `FooRequest` and returns a `FooResponse` (`OpenProjectRequest`, `RefreshResponse`, `ListProjectsResponse`). A type nested inside them is named for what it is (`ProjectSummary`).
+**Names.** An interface's request and response types are its **wire model**, kept in a `wire_model` module (`web/wire_model.py`), not "DTOs". Operation `Foo` takes a `FooRequest` and returns a `FooResponse` (`OpenProjectRequest`, `RefreshResponse`, `ListProjectsResponse`). A type nested inside them is named for what it is (`ProjectSummary`).
 
 ## Layout
 
@@ -79,7 +79,7 @@ These apply to new code now, and existing code moves to them gradually.
 | `src/szsdlc_ui_win95/documents.py` | Document references, root containment, reading |
 | `src/szsdlc_ui_win95/registry.py` | The projects one viewer serves |
 | `src/szsdlc_ui_win95/services/` | The viewer's operations, framework-free: `ViewerService` and its typed refusals |
-| `src/szsdlc_ui_win95/web/` | HTTP: the FastAPI app (`app.py`), its request and response types (`dtos.py`), problem rendering, the hardening middleware (`asgi.py`) and the uvicorn server |
+| `src/szsdlc_ui_win95/web/` | HTTP: the FastAPI app (`app.py`), its request and response types (`wire_model.py`), problem rendering, the hardening middleware (`asgi.py`) and the uvicorn server |
 | `src/szsdlc_ui_win95/server.py` | The composition root: the service, the web app and the server, wired together |
 | `src/szsdlc_ui_win95/export.py` | The static snapshot |
 | `src/szsdlc_ui_win95/cli.py` | The `szsdlc-ui-win95` command |

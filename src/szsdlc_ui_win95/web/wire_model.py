@@ -1,4 +1,5 @@
-"""The HTTP request and response types. Operation `Foo` has `FooRequest` and `FooResponse`.
+"""The wire model: the HTTP request and response types. Operation `Foo` has `FooRequest`
+and `FooResponse`.
 
 They describe the API (`/api/openapi.json`) and validate request bodies.
 Handlers render responses themselves, so the bytes stay exactly the viewer's.

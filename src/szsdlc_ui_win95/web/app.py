@@ -17,7 +17,7 @@ from starlette.responses import Response
 from .. import __version__
 from ..services import ServiceError, ViewerService
 from .asgi import Harden
-from .dtos import (ListProjectsResponse, MetaResponse, OpenProjectRequest, OpenProjectResponse,
+from .wire_model import (ListProjectsResponse, MetaResponse, OpenProjectRequest, OpenProjectResponse,
                    RefreshRequest, RefreshResponse)
 from .responses import problem, refusal, send, send_json
 
