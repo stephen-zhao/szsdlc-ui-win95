@@ -17,27 +17,27 @@ Needs Python 3.12+.
 ```sh
 pip install zhaostephen-szsdlc-ui-win95     # or: uv tool install zhaostephen-szsdlc-ui-win95
 
-cd my-project && szsdlc-ui-win95 --open      # this project, and every one szsdlc keeps elsewhere
+cd my-project && szsdlc-ui-win95 --open      # this project, and every project sdlc store szsdlc has recorded
 ```
 
 It serves `http://localhost:8095/`, on loopback only, and never writes to a
 project.
 
-**What opens by default:** every store szsdlc keeps elsewhere (git-kept clones
-and `dir` stores it has registered), plus the project you are standing in, if
-any. Projects named on the command line open beside the registered ones.
-`--no-registered` opens only the projects named, or the current directory. A
-plain folder opened with File → Open project… is still forgotten on restart
-unless you use `--projects-file`. `--export` never adds registered stores: a
-snapshot holds only what the command line names.
+**What opens by default:** every project sdlc store szsdlc has recorded (git
+clones and `dir` directories), plus the project you are standing in, if any.
+Projects named on the command line open beside them. `--no-registered` opens
+only the projects named, or the current directory. A plain folder opened with
+File → Open project… is still forgotten on restart unless you use
+`--projects-file`. `--export` never adds recorded stores: a snapshot holds only
+what the command line names.
 
 Other ways to run it:
 
 ```sh
 szsdlc-ui-win95 ~/code/app ~/code/lab                 # several projects in one viewer
 szsdlc-ui-win95 https://github.com/org/tracker.git    # a project kept in a git repository
-szsdlc-ui-win95 ~/sdlc-store::~/code/app              # resolve out-of-tree docs against ~/code/app
-szsdlc-ui-win95 --no-registered                       # only the current project, not the registered stores
+szsdlc-ui-win95 ~/sdlc-store::~/code/app              # ~/code/app is the project asset root, for its documents
+szsdlc-ui-win95 --no-registered                       # only the current project, not the recorded stores
 szsdlc-ui-win95 --projects-file ~/.config/szsdlc/viewer.yml   # remembered projects
 szsdlc-ui-win95 ~/code/app --export app.html          # one self-contained HTML snapshot
 szsdlc-ui-win95 --port 0                              # any free port
@@ -46,23 +46,28 @@ szsdlc-ui-win95 --port 0                              # any free port
 A project can be opened from **any location, whatever backend keeps it**: on
 the command line, in the projects file, or with File → Open project…:
 
-- **a folder on this computer**: a project, or any folder inside one. For a
-  code repository whose settings keep its project elsewhere (a `git` or `dir`
-  backend), that store is used, created or cloned if needed, and the repository
-  becomes the code root for out-of-tree documents;
-- **where a project is kept**, such as a git URL (`https://host/org/repo.git`,
+- **a folder on this computer**: a project, or any folder inside one. When a
+  repository's settings select a `git` or `dir` sdlc backend, the project sdlc
+  store dir it names is used (created or cloned if needed), and the repository
+  becomes the **project asset root**, where documents outside the project sdlc
+  root are found;
+- **a repository URL** holding the project (`https://host/org/repo.git`,
   `git@host:org/repo.git`, optionally `#branch`). It is cloned the first time,
   exactly as szsdlc's git backend clones it.
+
+A document is labelled by the root it comes from: **SDLC** (the project sdlc
+root, with the records) or **Assets** (a project asset root). These are the
+words of szsdlc's glossary.
 
 Opening a project it already has brings a clone up to date, but only when that
 clone has nothing unsent; otherwise the clone is shown as it is. Viewing never
 writes to a project.
 
-**Refresh** (View → Refresh, F5, or the taskbar's project menu) takes the latest
-from where the project is kept, through szsdlc's own `refresh`. It sends nothing
+**Refresh** (View → Refresh, F5, or the taskbar's project menu) takes the sdlc
+backend's latest, through szsdlc's own `refresh`. It sends nothing
 and merges nothing, and every open window redraws in place. A project kept in a
-folder here is simply read again. If the copy holds changes that were never
-sent, Refresh asks before replacing them, and szsdlc keeps what it replaces.
+folder here is simply read again. If the copy has unsent changes, Refresh asks
+before replacing them, and szsdlc keeps what it replaces.
 
 The project on screen also **refreshes itself in the background**, every minute
 by default. The ▾ beside the Refresh button sets how often (Off, 30 seconds, 1

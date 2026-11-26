@@ -56,8 +56,8 @@ def clones(home: Path) -> list[Path]:
 
 def test_open_by_repository_url_clones_through_szsdlc(remote, isolated_szsdlc):
     p = Project(remote.as_uri())
-    assert p.remote and p.relocated and p.code_root is None
-    assert p.store.parent == isolated_szsdlc / "szsdlc" / "git"  # szsdlc's own clone location
+    assert p.remote and p.relocated and p.asset_root is None
+    assert p.sdlc_root.parent == isolated_szsdlc / "szsdlc" / "git"  # szsdlc's own clone location
     assert len(p.store_model) == 5
     info = p.info()
     assert info["backend"]["kind"] == "git" and info["location"] == remote.as_uri()
@@ -67,7 +67,7 @@ def test_open_by_repository_url_clones_through_szsdlc(remote, isolated_szsdlc):
 def test_reopening_reuses_the_clone(remote, isolated_szsdlc):
     first = Project(remote.as_uri())
     again = Project(remote.as_uri())
-    assert again.store == first.store and len(clones(isolated_szsdlc)) == 1
+    assert again.sdlc_root == first.sdlc_root and len(clones(isolated_szsdlc)) == 1
 
 
 def test_a_clean_clone_is_brought_up_to_date_when_opened(remote, tmp_path):
@@ -80,11 +80,11 @@ def test_a_clean_clone_is_brought_up_to_date_when_opened(remote, tmp_path):
 
 def test_a_clone_with_unsent_work_is_left_alone(remote, tmp_path):
     first = Project(remote.as_uri())
-    epic = next((first.store / "epics").glob("EPIC-0001-*"))
+    epic = next((first.sdlc_root / "epics").glob("EPIC-0001-*"))
     epic.write_text(epic.read_text().replace("Ship the viewer", "Edited here, not sent"), encoding="utf-8")
     push_new_epic(remote, tmp_path, "Arrived later")
     p = Project(remote.as_uri())
-    assert "not yet sent" in p.update_warning
+    assert "unsent changes" in p.update_warning
     assert p.entity("EPIC-0001")["title"] == "Edited here, not sent"
     assert not any(e.title == "Arrived later" for e in p.store_model)
 
@@ -104,7 +104,7 @@ def test_a_code_folder_whose_settings_select_git(remote, tmp_path, isolated_szsd
         "SZSDLC_BACKEND": "git", "SZSDLC_BACKEND_GIT_URL": remote.as_uri(), "SZSDLC_BACKEND_GIT_BRANCH": "main"}}))
     p = Project(code)
     assert not p.remote and p.relocated
-    assert p.code_root == code.resolve() and p.store.parent == isolated_szsdlc / "szsdlc" / "git"
+    assert p.asset_root == code.resolve() and p.sdlc_root.parent == isolated_szsdlc / "szsdlc" / "git"
     assert len(p.store_model) == 5 and p.info()["location"] == str(code.resolve())
 
 
@@ -196,11 +196,11 @@ def test_refresh_asks_before_replacing_unsent_changes(remote, tmp_path):
     from szsdlc_ui_win95.errors import UnsentChanges
 
     p = Project(remote.as_uri())
-    epic = next((p.store / "epics").glob("EPIC-0001-*"))
+    epic = next((p.sdlc_root / "epics").glob("EPIC-0001-*"))
     epic.write_text(epic.read_text().replace("Ship the viewer", "Edited here, not sent"), encoding="utf-8")
     push_new_epic(remote, tmp_path, "Arrived later")
 
-    with pytest.raises(UnsentChanges, match="not yet sent"):
+    with pytest.raises(UnsentChanges, match="unsent changes"):
         p.refresh_from_backend()
     assert "Edited here, not sent" in epic.read_text()  # untouched
 
@@ -228,11 +228,11 @@ def test_refresh_over_http_asks_then_replaces(remote, tmp_path):
     server = make_server(registry, "127.0.0.1", 0, allow_open=False)  # refreshing opens nothing
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
-        store = registry.get(pid).store
+        store = registry.get(pid).sdlc_root
         (store / "scratch.md").write_text("unsent", encoding="utf-8")
         auth = {"X-Viewer-Token": token(server)}
         status, _, body = call(server, "POST", f"/api/p/{pid}/refresh", {}, auth)
-        assert status == 409 and "not yet sent" in body["detail"]
+        assert status == 409 and "unsent changes" in body["detail"]
         status, _, body = call(server, "POST", f"/api/p/{pid}/refresh", {"replace": True}, auth)
         assert status == 200 and body["replaced"] and body["project"]["id"] == pid
         assert not (store / "scratch.md").exists()

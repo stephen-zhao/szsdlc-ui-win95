@@ -4,7 +4,7 @@ Routes (every project route is scoped by project id):
 
     GET  /api/meta                       viewer and szsdlc versions
     GET  /api/projects                   the projects this viewer serves
-    POST /api/projects  {location, code_root?}   open a project: a folder here or a repository
+    POST /api/projects  {location, asset_root?}  open a project: a folder here or a repository
                                          URL; any backend (needs the launch token)
     POST /api/p/<id>/refresh  {replace?} take the sdlc backend's latest, sending nothing;
                                          409 when unsent changes would be replaced

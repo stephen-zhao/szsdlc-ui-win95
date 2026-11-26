@@ -51,9 +51,9 @@ See https://example.org/spec for background.
 
 
 @pytest.fixture
-def code_root(tmp_path) -> Path:
+def asset_root(tmp_path) -> Path:
     """The repository a project describes, holding an out-of-tree document."""
-    root = tmp_path / "code"
+    root = tmp_path / "assets"
     (root / "docs").mkdir(parents=True)
     (root / "docs" / "guide.md").write_text("# Guide\n\nOut of tree.\n", encoding="utf-8")
     return root

@@ -67,9 +67,12 @@ def query(request: Request, key: str, default: str = "") -> str:
 
 
 def open_project_args(body: dict) -> tuple[str, str | None]:
-    """An Open project body as `(location, code_root)`; `store` is the 0.1 name for `location`."""
+    """An Open project body as `(location, asset_root)`.
+
+    `store` and `code_root` are the 0.1 names for `location` and `asset_root`.
+    """
     asked = validated(OpenProjectRequest, body)
-    return asked.location or asked.store or "", asked.code_root
+    return asked.location or asked.store or "", asked.asset_root or asked.code_root
 
 
 def refresh_args(body: dict) -> bool:

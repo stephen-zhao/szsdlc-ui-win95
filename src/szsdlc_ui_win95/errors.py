@@ -6,4 +6,4 @@ class ProjectError(ValueError):
 
 
 class UnsentChanges(ProjectError):
-    """Refreshing would replace work the copy has not sent where the project is kept."""
+    """Refreshing would replace the copy's unsent changes."""

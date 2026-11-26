@@ -34,7 +34,7 @@ def registered(other, isolated_szsdlc):
 
 def opened(*argv: str) -> set[str]:
     registry = cli.open_projects(cli.build_parser().parse_args(list(argv)))
-    return {p.store.name for p in registry.projects.values()}
+    return {p.sdlc_root.name for p in registry.projects.values()}
 
 
 def test_a_bare_launch_opens_every_registered_store_and_the_current_project(

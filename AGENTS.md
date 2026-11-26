@@ -28,16 +28,22 @@ and capture rather than discuss and forget.
    derived attributes and backend resolution come from the library. If the
    viewer needs a fact szsdlc does not expose, the fix belongs in szsdlc, not in a
    second parser here.
-3. **Read-only; a store is created only when a person opens a project.**
-   Opening takes any location (a folder here, or where a backend keeps the
-   project, such as a git URL) and goes through `locations.py`, which drives
-   szsdlc's own backends: `resolve`/`from_settings`, then `ensure`, which may
-   clone. Nothing else may create a store, and viewing never writes to one. A
-   clone is updated on open only when it has nothing unsent, and Refresh
+3. **Read-only; a project sdlc store dir is created only when a person opens a project.**
+   Opening takes any location (a folder here, or a repository URL holding the
+   project) and goes through `locations.py`, which drives szsdlc's own
+   backends: `resolve`/`from_settings`, then `ensure`, which may clone.
+   Nothing else may create one, and viewing never writes to a project. A clone
+   is updated on open only when it has no unsent changes, and Refresh
    replaces unsent state only after the person confirms, and only through
    szsdlc's own `refresh`. Phase 2 writes must
    go through szsdlc's own operations, never a file write, so every gate still
    applies.
+7. **Speak szsdlc's glossary.** The words are szsdlc's (its docs/reference.md,
+   "Backends → Glossary"): the **project sdlc root** (`.szsdlc/` and the
+   records; document root id `sdlc`), a **project asset root** (the code and
+   assets it describes; root id `assets`), the **project sdlc store dir**,
+   **unsent changes**. Not "store" on its own, "code root", "in tree" or
+   "where the project is kept"; older spellings are accepted on input only.
 6. **The backend is an implementation detail.** No UI names a backend or asks
    for one. Interpreting a location is the one backend-specific step, and it
    lives only in `locations.INTERPRETERS`.

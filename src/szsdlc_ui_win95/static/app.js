@@ -24,6 +24,11 @@
     return el;
   }
   const svg = (markup) => { const t = document.createElement('template'); t.innerHTML = markup.trim(); return t.content.firstChild; };
+  // A document root id in today's words. `store` and `code` are the ids before
+  // WI-0069, still found in copied links (`#<project>--doc:store:<path>`).
+  const LEGACY_ROOTS = { store: 'sdlc', code: 'assets', 'code?': 'assets?' };
+  const rootId = (root) => LEGACY_ROOTS[root] || root;
+  const WHERE_TIP = { sdlc: 'In the project sdlc root', assets: 'In a project asset root', 'assets?': 'In a project asset root' };
   const normId = (ref) => { const m = /^\s*([A-Za-z][A-Za-z0-9]*)-0*(\d+)\s*$/.exec(String(ref || '')); return m ? `${m[1].toUpperCase()}-${+m[2]}` : null; };
   const humanize = (s) => { const t = String(s).replace(/[_-]+/g, ' ').trim(); return t.charAt(0).toUpperCase() + t.slice(1); };
   const basename = (p) => String(p).split('/').pop();
@@ -61,14 +66,14 @@
   } : {
     meta: () => get('meta'),
     projects: () => get('projects'),
-    async open(location, codeRoot) {
+    async open(location, assetRoot) {
       const r = await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Viewer-Token': TOKEN },
-        body: JSON.stringify({ location, code_root: codeRoot || null }) });
+        body: JSON.stringify({ location, asset_root: assetRoot || null }) });
       const body = await r.json();
       if (!r.ok) { const e = new Error(body.detail || body.title || `HTTP ${r.status}`); e.fix = body.fix; throw e; }
       return body;
     },
-    // Take the latest from where the project is kept. Nothing is sent. A 409
+    // Take the sdlc backend's latest. Nothing is sent. A 409
     // means unsent changes would be replaced; the caller asks, then sets replace.
     async refresh(pid, replace = false) {
       const r = await fetch('/api/p/' + encodeURIComponent(pid) + '/refresh', { method: 'POST',
@@ -85,7 +90,7 @@
         project: async () => D.project, schema: async () => D.schema, entities: async () => D.entities,
         roadmaps: async () => D.roadmaps, docs: async () => D.docs_list,
         entity: async (id) => D.details[id] || null,
-        doc: async (root, path) => D.docs[`${root}:${path}`] || { root, path, exists: false, code_root: false },
+        doc: async (root, path) => D.docs[`${rootId(root)}:${path}`] || { root: rootId(root), path, exists: false, asset_root: false },
         raw: () => null,
       };
     }
@@ -610,7 +615,7 @@
     const t = typeOf(r);
     const w = openWindow({ key: 'props:' + S.pid + ':' + normId(r.id), title: `${r.id} Properties`, dialog: true, width: 420 });
     if (w.reused) return w;
-    const ctx = { root: 'store', path: r.path };
+    const ctx = { root: 'sdlc', path: r.path };
     const rels = (r.relations || []).length + (S.incoming.get(normId(r.id)) || []).length;
     const none = (x) => x || h('span', { class: 'muted' }, '(none)');
     const rows = [
@@ -708,12 +713,12 @@
     }
     const [p] = href.split('#');
     let root = ctx.root, path = joinPath(dirname(ctx.path || ''), decodeURIComponent(p));
-    if (path == null) { root = 'code'; path = decodeURIComponent(p).replace(/^(\.\.\/)+/, ''); }
-    a.title = `${root === 'store' ? 'In tree' : 'Out of tree'}: ${path}`;
+    if (path == null) { root = 'assets'; path = decodeURIComponent(p).replace(/^(\.\.\/)+/, ''); }
+    a.title = `${WHERE_TIP[rootId(root)] || 'In a project asset root'}: ${path}`;
     a.addEventListener('click', (e) => { e.preventDefault(); openPath(root, path, e.currentTarget); });
   }
   function openPath(root, path, src) {
-    const ent = root === 'store' && S.byPath.get(path);
+    const ent = root === 'sdlc' && S.byPath.get(path);
     if (ent && ent.layout !== 'section') return openItem(ent.id, src);
     openDoc(root, path, { fallback: true });
   }
@@ -1217,7 +1222,7 @@
     S.api.entity(row.id).then((d) => {
       if (!root.isConnected || S.pid !== pid) return;
       if (!d) { root.replaceChildren(h('p', { class: 'bad pad' }, `Could not read ${row.id}.`)); return; }
-      const ctx = { root: 'store', path: d.path };
+      const ctx = { root: 'sdlc', path: d.path };
       const kids = childrenOf(row.id);
       const tabs = [];
       const overview = { id: 'overview', label: 'Overview', render: () => overviewTab(d, t, ctx) };
@@ -1253,7 +1258,7 @@
     return h('header', { class: 'item-head' },
       icon(typeIcon(t), 32),
       h('div', { class: 'grow', style: { minWidth: 0 } }, crumbs,
-        h('h2', null, renderMarkdown(d.title, { root: 'store', path: d.path }, { inline: true })),
+        h('h2', null, renderMarkdown(d.title, { root: 'sdlc', path: d.path }, { inline: true })),
         meta, workflowStrip(t, d.status)),
       h('button', { class: 'btn', type: 'button', title: 'Open this item in a new Explorer window', onclick: () => openItem(row.id, null, { newWindow: true }) }, icon('newwin'), ' New window'));
   }
@@ -1263,7 +1268,7 @@
       h('dt', null, 'Type'), h('dd', null, `${t.label} (${t.prefix})`),
       h('dt', null, 'Status'), h('dd', null, d.status || h('span', { class: 'muted' }, '(none)')),
       h('dt', null, 'Layout'), h('dd', null, humanize(d.layout)),
-      h('dt', null, 'File'), h('dd', null, h('button', { class: 'link', type: 'button', title: d.path, onclick: () => openDoc('store', d.path) }, basename(d.path))),
+      h('dt', null, 'File'), h('dd', null, h('button', { class: 'link', type: 'button', title: d.path, onclick: () => openDoc('sdlc', d.path) }, basename(d.path))),
       t.relations_out.includes(parentRel) || d.parent ? [h('dt', null, humanize(parentRel)), h('dd', null, d.parent ? entLink(d.parent) : h('span', { class: 'muted' }, '(none)'))] : null,
       t.flags.schedulable ? [h('dt', null, 'Roadmap'), h('dd', null, d.placement ? `${humanize(d.placement.horizon)} #${d.placement.position}` : h('span', { class: 'muted' }, 'Not scheduled'))] : null));
     const fields = t.fields.length ? h('fieldset', null, h('legend', null, 'Fields'),
@@ -1294,7 +1299,7 @@
     const savedW = +store.get('factsWidth');
     if (savedW) aside.style.width = savedW + 'px';
     const handle = h('div', { class: 'splitter', role: 'separator', 'aria-orientation': 'vertical', 'aria-label': 'Resize the details panel', tabindex: '0' });
-    const wrap = h('div', { class: 'overview' }, docBlock({ text: d.body, ctx, empty: '(This item has no description.)', open: () => openDoc('store', d.path) }), handle, aside);
+    const wrap = h('div', { class: 'overview' }, docBlock({ text: d.body, ctx, empty: '(This item has no description.)', open: () => openDoc('sdlc', d.path) }), handle, aside);
     const setW = (px) => { aside.style.width = Math.max(180, Math.min(px, Math.max(220, wrap.clientWidth - 260))) + 'px'; store.set('factsWidth', String(aside.offsetWidth)); };
     drag(handle, aside, (dx, dy, start) => setW(start.w - dx));
     handle.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') { setW(aside.offsetWidth + (e.key === 'ArrowLeft' ? 16 : -16)); e.preventDefault(); } });
@@ -1320,7 +1325,7 @@
   }
   function artifactTab(path) {
     const root = h('div', { class: 'panel-fill' }, h('p', { class: 'muted pad' }, 'Reading…'));
-    S.api.doc('store', path).then((doc) => root.replaceChildren(docBlock({ text: doc.text, raw: doc.raw, ctx: { root: 'store', path }, front: doc.frontmatter, title: path, open: () => openDoc('store', path) })));
+    S.api.doc('sdlc', path).then((doc) => root.replaceChildren(docBlock({ text: doc.text, raw: doc.raw, ctx: { root: 'sdlc', path }, front: doc.frontmatter, title: path, open: () => openDoc('sdlc', path) })));
     return root;
   }
 
@@ -1340,8 +1345,8 @@
   }
   function checklistTab(path, host) {
     const root = h('div', { class: 'panel-fill' }, h('p', { class: 'muted pad' }, 'Reading…'));
-    S.api.doc('store', path).then((doc) => {
-      const ctx = { root: 'store', path };
+    S.api.doc('sdlc', path).then((doc) => {
+      const ctx = { root: 'sdlc', path };
       const segs = parseChecklist(doc.text || '');
       const tasks = segs.filter((s) => s.kind === 'task');
       const done = tasks.filter((s) => s.done).length;
@@ -1370,7 +1375,7 @@
         h('div', { class: 'row' }, h('b', { class: 'big' }, `${done} of ${tasks.length} done`), h('span', { class: 'muted' }, `${pct}%`), h('span', { class: 'grow' }),
           next ? h('button', { class: 'btn', type: 'button', onclick: () => nextEl?.scrollIntoView({ block: 'center', behavior: 'smooth' }) }, 'Go to next step') : h('span', { class: 'pill' }, 'All done'),
           h('label', { class: 'row', for: hideId }, hide, 'Hide done'),
-          h('button', { class: 'btn', type: 'button', onclick: () => openDoc('store', path) }, icon('doc'), ' As document')),
+          h('button', { class: 'btn', type: 'button', onclick: () => openDoc('sdlc', path) }, icon('doc'), ' As document')),
         h('div', { class: 'progress big', role: 'progressbar', 'aria-valuenow': String(pct), 'aria-valuemin': '0', 'aria-valuemax': '100' }, h('b', { style: { width: pct + '%' } })),
         h('p', { class: 'muted', style: { margin: 0 } }, `Parsed from ${basename(path)}. Progress is counted from its checkboxes, never typed in.`));
       root.replaceChildren(summary, h('div', { class: 'page' }, h('div', { class: 'page-inner' }, list)));
@@ -1522,7 +1527,8 @@
     return el;
   }
 
-  const WHERE = { store: 'In tree', code: 'Out of tree', 'code?': 'Out of tree', web: 'Web' };
+  // Which root a document comes from, in szsdlc's glossary words (WI-0069).
+  const WHERE = { sdlc: 'SDLC', assets: 'Assets', 'assets?': 'Assets', web: 'Web' };
   function documentsTab(d) {
     const docs = d.documents;
     const root = h('div', { class: 'panel-fill' });
@@ -1530,8 +1536,8 @@
     const iconFor = (x) => x.kind === 'link' ? 'globe' : x.exists === false ? 'missing' : x.kind === 'entity' ? typeIcon(typeOf(S.byKey.get(normId(x.entity)))) : x.kind === 'record' ? typeIcon(typeOf(d)) : 'doc';
     root.append(
       h('div', { class: 'row', style: { flexWrap: 'wrap' } },
-        h('span', { class: 'badge' }, `In tree: ${n('In tree')}`), h('span', { class: 'badge out' }, `Out of tree: ${n('Out of tree')}`), h('span', { class: 'badge' }, `Web: ${n('Web')}`),
-        S.project.code_root ? null : h('span', { class: 'muted' }, 'No code root: out-of-tree paths cannot be opened.')),
+        h('span', { class: 'badge', title: WHERE_TIP.sdlc }, `SDLC: ${n('SDLC')}`), h('span', { class: 'badge out', title: WHERE_TIP.assets }, `Assets: ${n('Assets')}`), h('span', { class: 'badge' }, `Web: ${n('Web')}`),
+        S.project.asset_root ? null : h('span', { class: 'muted' }, 'No asset root: paths outside the project sdlc root cannot be opened.')),
       listView({
         sortKey: 'documents', rows: docs, empty: 'No documents.',
         ctx: (x) => (x.kind === 'entity' ? { 'data-ref': x.entity } : x.kind === 'link' || !x.path ? null : { 'data-doc-root': x.root, 'data-doc-path': x.path }),
@@ -1553,10 +1559,10 @@
     return root;
   }
   function missingDoc(root, path) {
-    const out = root !== 'store';
+    const out = rootId(root) !== 'sdlc';
     messageBox({ kind: 'warn', title: 'Document not found', text: [
       `Cannot find “${path}”.`,
-      out && !S.project.code_root ? (SNAP ? 'It lives outside the project store. This snapshot carries only the store; the local viewer resolves it against the code root you start it with.' : 'It lives outside the project store. Restart the viewer with STORE::CODE_ROOT pointing at the repository it describes.')
+      out && !S.project.asset_root ? (SNAP ? 'It lives outside the project sdlc root. This snapshot carries only the sdlc root; the local viewer resolves it against the asset root you start it with.' : 'It lives outside the project sdlc root. Restart the viewer with LOCATION::ASSET_ROOT pointing at the folder it describes.')
         : 'It is mentioned by the item but no file exists at that path.',
     ] });
   }
@@ -1602,7 +1608,7 @@
   async function openDoc(root, path, { fallback = false, mode } = {}) {
     const d = await S.api.doc(root, path, fallback);
     if (!d || !d.exists) return missingDoc(root, path);
-    const out = d.root !== 'store';
+    const out = d.root !== 'sdlc';
     const w = openWindow({
       key: `doc:${d.root}:${d.path}`, title: `${basename(d.path)} - Document Viewer`, icon: out ? ['doc', '#a05000'] : 'doc', width: 720, height: 560, status: true,
       menu: [{ label: 'File', items: () => [d.entity ? { label: `Open ${d.entity}`, action: () => openItem(d.entity) } : null, { label: 'Close', action: () => w.close() }].filter(Boolean) }],
@@ -1610,12 +1616,12 @@
     if (w.reused) { if (mode) w.setDocMode?.(mode); return w; }
     const lead = d.entity ? h('p', null, h('button', { class: 'btn', type: 'button', onclick: () => openItem(d.entity) }, icon(typeIcon(typeOf(S.byKey.get(normId(d.entity))))), ` Open ${d.entity}`)) : null;
     w.body.append(
-      h('div', { class: 'addr' }, h('span', null, 'Address'), h('div', { class: 'field' }, h('span', { class: 'badge' + (out ? ' out' : '') }, out ? 'Out of tree' : 'In tree'), `${d.root}:/${d.path}`)),
+      h('div', { class: 'addr' }, h('span', null, 'Address'), h('div', { class: 'field' }, h('span', { class: 'badge' + (out ? ' out' : ''), title: WHERE_TIP[out ? 'assets' : 'sdlc'] }, out ? 'Assets' : 'SDLC'), `${d.root}:/${d.path}`)),
       w.docBlock = d.kind === 'markdown'
         ? docBlock({ text: d.text, raw: d.raw, ctx: { root: d.root, path: d.path }, front: d.frontmatter, lead, mode })
         : docBlock({ text: '```\n' + (d.text || '') + '\n```', raw: d.raw ?? d.text, ctx: { root: d.root, path: d.path }, mode }));
     w.setDocMode = w.docBlock.setMode;
-    w.setStatus([d.kind === 'markdown' ? 'GitHub-flavoured Markdown' : 'Plain text', out ? 'Out of tree' : 'In tree', fmtSize(d.size)]);
+    w.setStatus([d.kind === 'markdown' ? 'GitHub-flavoured Markdown' : 'Plain text', out ? 'Assets' : 'SDLC', fmtSize(d.size)]);
     return w;
   }
 
@@ -1849,10 +1855,11 @@
       h('p', null, h('b', null, 'szsdlc-ui-win95'), ` ${META.version || ''}`, h('span', { class: 'muted' }, ' — read-only')),
       h('dl', { class: 'kv', style: { margin: '8px 0' } },
         h('dt', null, 'Project:'), h('dd', null, `${p.name} (${S.pid}), one of ${PROJECTS.length} open`),
-        h('dt', null, 'Store:'), h('dd', null, p.store),
-        h('dt', null, 'Code root:'), h('dd', null, p.code_root || '(none)'),
+        h('dt', null, 'SDLC root:'), h('dd', null, p.sdlc_root),
+        p.sdlc_store_dir && p.sdlc_store_dir !== p.sdlc_root ? [h('dt', null, 'SDLC store dir:'), h('dd', null, p.sdlc_store_dir)] : null,
+        h('dt', null, 'Asset root:'), h('dd', null, p.asset_root || '(none)'),
         h('dt', null, 'Backend:'), h('dd', null, `${p.backend.kind} (${p.backend.source})`),
-        h('dt', null, 'Schema:'), h('dd', null, schemaFromConfig() ? `read by szsdlc ${S.schema.szsdlc_version || ''}` : 'inferred from the store’s files'),
+        h('dt', null, 'Schema:'), h('dd', null, schemaFromConfig() ? `read by szsdlc ${S.schema.szsdlc_version || ''}` : 'inferred from the project’s files'),
         h('dt', null, 'Items:'), h('dd', null, `${S.rows.length} across ${S.schema.types.length} types`),
         SNAP ? [h('dt', null, 'Snapshot:'), h('dd', null, SNAP.generated_at)] : null),
       h('p', { class: 'muted' }, 'Phase 2 adds editing through szsdlc’s own commands, so every gate and validation still applies.'),
@@ -1944,7 +1951,7 @@
     const k = normId(target);
     if (k && S.byKey.has(k)) { openItem(k, src); return true; }
     const m = /^doc:([^:]+):(.+)$/.exec(target);
-    if (m) { openDoc(m[1], m[2], { fallback: true }); return true; }
+    if (m) { openDoc(rootId(m[1]), m[2], { fallback: true }); return true; }
     const [kind, v] = splitNode(target);
     const ok = (kind === 'type' && S.types.has(v)) || (kind === 'tag' && S.tags.has(v))
       || (!v && ['project', 'roadmap', 'docs', 'tags'].includes(kind)) || (target === 'inbox' && S.schema.types.some((t) => t.flags.intake));
@@ -2002,13 +2009,13 @@
   }
   function projectMenuItems() {
     return [
-      ...PROJECTS.map((p) => ({ label: `${p.id === S?.pid ? '● ' : ' '}${p.name}`, icon: 'computer', title: p.store, action: () => switchProject(p.id) })),
+      ...PROJECTS.map((p) => ({ label: `${p.id === S?.pid ? '● ' : ' '}${p.name}`, icon: 'computer', title: p.sdlc_root, action: () => switchProject(p.id) })),
       SNAP ? null : { label: 'Open project…', icon: ['folder'], action: openProjectDialog },
       SNAP || !S ? null : { label: `Refresh ${S.project.name} (F5)`, action: () => refreshProject() },
     ].filter(Boolean);
   }
 
-  // Refresh: take the latest from where the project is kept, then redraw every
+  // Refresh: take the sdlc backend's latest, then redraw every
   // open window of it in place. Nothing is sent. When to refresh, and how a
   // person's Refresh and the background one take turns, is refresh.js's job
   // (the scheduler); this is what one refresh does.
@@ -2140,7 +2147,7 @@
         { key: 'entity_count', label: 'Items' }, { key: 'type_count', label: 'Types' },
         { key: 'backend', label: 'Backend', get: (p) => p.backend.kind },
         { key: 'schema_source', label: 'Schema', get: (p) => p.schema_source === 'inferred' ? 'inferred' : 'szsdlc config' },
-        { key: 'location', label: 'Location', get: (p) => p.location || p.store }, { key: 'code_root', label: 'Code root', get: (p) => p.code_root || '' },
+        { key: 'location', label: 'Location', get: (p) => p.location || p.sdlc_root }, { key: 'asset_root', label: 'Asset root', get: (p) => p.asset_root || '' },
       ],
       onOpen: (p) => switchProject(p.id),
     }));
@@ -2151,7 +2158,7 @@
     const store = h('input', { class: 'field grow', id: 'szv-open-store', type: 'text', placeholder: 'C:\\code\\project, or https://host/org/repo.git', autocomplete: 'off', spellcheck: 'false' });
     const code = h('input', { class: 'field grow', id: 'szv-open-code', type: 'text', placeholder: 'optional: the repo it describes', autocomplete: 'off' });
     const err = h('p', { class: 'bad', hidden: true });
-    const busy = h('p', { class: 'muted', hidden: true }, 'Opening… a project kept elsewhere is fetched the first time, which can take a moment.');
+    const busy = h('p', { class: 'muted', hidden: true }, 'Opening… a project in a repository is cloned the first time, which can take a moment.');
     let working = false;
     async function go() {
       if (working) return;
@@ -2173,9 +2180,9 @@
     }
     w.body.append(
       h('div', { class: 'dialog-body' }, icon(['folder'], 32), h('div', { class: 'grow', style: { display: 'grid', gap: '6px' } },
-        h('p', null, 'Type where the project is: a folder on this computer (any folder inside a project works), or where it is kept, such as a repository URL.'),
+        h('p', null, 'Type where the project is: a folder on this computer (any folder inside a project works), or a repository URL.'),
         h('label', { class: 'row', for: 'szv-open-store' }, h('span', { style: { width: '74px' } }, 'Location:'), store),
-        h('label', { class: 'row', for: 'szv-open-code' }, h('span', { style: { width: '74px' } }, 'Code root:'), code),
+        h('label', { class: 'row', for: 'szv-open-code' }, h('span', { style: { width: '74px' } }, 'Asset root:'), code),
         busy, err)),
       h('div', { class: 'row end' }, h('button', { class: 'btn default', type: 'button', onclick: go }, 'Open'), h('button', { class: 'btn', type: 'button', onclick: () => w.close() }, 'Cancel')));
     store.addEventListener('keydown', (e) => { if (e.key === 'Enter') go(); });

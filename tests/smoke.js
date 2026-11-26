@@ -31,6 +31,8 @@ const { chromium } = require('playwright');
     await page.click(`${W} .item-page .tab:has-text("Documents")`);
     await page.dblclick(`${W} .item-page .lv tr:has-text("docs/guide.md")`);
     await page.waitForSelector('.window:has-text("guide.md - Document Viewer") .md h1:has-text("Guide")');
+    const badge = (await page.textContent('.window:has-text("guide.md - Document Viewer") .addr .badge')).trim();
+    if (badge !== 'Assets') throw new Error(`a document from the asset root is badged "${badge}"`);
     await page.click('.window:has-text("guide.md - Document Viewer") .tb-btn.close');
   });
   await step('parent keeps the path', async () => {
@@ -115,6 +117,11 @@ const { chromium } = require('playwright');
       if (label === 'normal') await page.dblclick(`${W} .titlebar .t`);  // maximize: a wider toolbar
     }
     await page.dblclick(`${W} .titlebar .t`);
+  });
+  await step('an old doc:code: link still opens the document (WI-0069)', async () => {
+    await page.evaluate(() => { location.hash = '#proj--doc:code:docs/guide.md'; });
+    await page.waitForSelector('.window:has-text("guide.md - Document Viewer") .md h1:has-text("Guide")');
+    await page.click('.window:has-text("guide.md - Document Viewer") .tb-btn.close');
   });
   await step('context menu: View as ▸ from a tree folder', async () => {
     await page.locator(`${W} .tree .node:visible`, { hasText: 'Work items' }).first().click({ button: 'right' });

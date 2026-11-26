@@ -16,7 +16,7 @@ from .server import make_server
 
 
 def parse_project(arg: str) -> tuple[str, Path | None]:
-    """`LOCATION` or `LOCATION::CODE_ROOT`. `::` clashes neither with a Windows drive nor with a URL scheme."""
+    """`LOCATION` or `LOCATION::ASSET_ROOT`. `::` clashes neither with a Windows drive nor with a URL scheme."""
     location, _, code = arg.partition("::")
     return location, (Path(code) if code else None)
 
@@ -24,15 +24,15 @@ def parse_project(arg: str) -> tuple[str, Path | None]:
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="szsdlc-ui-win95",
                                  description="A Windows 95-styled viewer for szsdlc projects. Read-only.")
-    ap.add_argument("projects", nargs="*", metavar="LOCATION[::CODE_ROOT]",
-                    help="projects to serve: a folder inside one, or where a backend keeps one, "
-                         "such as a git URL (default: the current directory)")
+    ap.add_argument("projects", nargs="*", metavar="LOCATION[::ASSET_ROOT]",
+                    help="projects to serve: a folder inside one, or a repository URL holding one "
+                         "(default: the current directory); ::ASSET_ROOT names the project asset root")
     ap.add_argument("--registered", action=argparse.BooleanOptionalAction, default=True,
-                    help="open every store szsdlc keeps elsewhere, beside the projects named "
+                    help="open every project sdlc store szsdlc has recorded, beside the projects named "
                          "(default: on; --no-registered opens only those named, or the current "
                          "directory). Never applies to --export")
     ap.add_argument("--projects-file", metavar="FILE",
-                    help="YAML list of {location, code_root}: read at start, rewritten when a project is opened")
+                    help="YAML list of {location, asset_root}: read at start, rewritten when a project is opened")
     ap.add_argument("--no-open", action="store_true", help="refuse File > Open project from the browser")
     ap.add_argument("--host", default="127.0.0.1", help="interface to bind (default: loopback only)")
     ap.add_argument("--port", type=int, default=8095, help="port (0 picks a free one; default 8095)")
@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
 def open_projects(args: argparse.Namespace) -> Registry:
     """Every project this launch serves, or exports.
 
-    The projects file first, then every store szsdlc keeps elsewhere (unless
+    The projects file first, then every project sdlc store szsdlc has recorded (unless
     `--no-registered`, and never for `--export`: a snapshot holds only what the
     command line names), then the projects named, or the current directory.
 
@@ -94,7 +94,7 @@ def main(argv=None) -> int:
     url = f"http://{host}:{server.server_port}/"
     print(f"szsdlc-ui-win95 {__version__} (szsdlc {szsdlc.__version__}): {len(registry.projects)} project(s)")
     for pid, p in registry.projects.items():
-        print(f"  {pid:<24} {p.store}  ({len(p.store_model)} entities; code root: {p.code_root or 'none'})")
+        print(f"  {pid:<24} {p.sdlc_root}  ({len(p.store_model)} entities; asset root: {p.asset_root or 'none'})")
         if p.update_warning:
             print(f"  {'':<24} note: {p.update_warning}")
     print(f"  serving {url}  (read-only; Ctrl-C to stop)")
