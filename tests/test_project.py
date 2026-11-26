@@ -45,8 +45,8 @@ def test_rows_carry_traits_placement_and_authored_relations(project):
     assert rows["REQ-0001"]["progress"] is None  # a type that does not track progress has none, not 0/0
 
 
-def test_entity_detail_has_derived_inverses_and_documents(project, code_root):
-    p = Project(project, code_root)
+def test_entity_detail_has_derived_inverses_and_documents(project, asset_root):
+    p = Project(project, asset_root)
     req = p.entity("req-1")
     assert req["derived"] == {"covered": True, "delivered": False}
     assert {"direction": "in", "kind": "implements", "inverse": "implemented_by", "id": "WI-0001", "resolved": True} in req["relations"]
@@ -56,30 +56,30 @@ def test_entity_detail_has_derived_inverses_and_documents(project, code_root):
     docs = {d["name"]: d for d in p.entity("WI-0001")["documents"]}
     assert docs["entity.md"]["kind"] == "record"
     assert docs["plan.md"]["kind"] == "artifact" and docs["design.md"]["kind"] == "artifact"
-    assert docs["../../docs/guide.md"]["root"] == "code" and docs["../../docs/guide.md"]["exists"]
+    assert docs["../../docs/guide.md"]["root"] == "assets" and docs["../../docs/guide.md"]["exists"]
     assert docs["../../requirements/REQ-0001-every-view-follows-traits.md"]["entity"] == "REQ-0001"
     assert docs["https://example.org/spec"]["kind"] == "link"
     assert p.entity("WI-9999") is None
 
 
-def test_out_of_tree_reference_without_a_code_root_says_so(project):
+def test_an_asset_reference_without_an_asset_root_says_so(project):
     docs = {d["name"]: d for d in Project(project).entity("WI-0001")["documents"]}
-    assert docs["docs/guide.md"]["exists"] is False and docs["docs/guide.md"]["root"] == "code?"
+    assert docs["docs/guide.md"]["exists"] is False and docs["docs/guide.md"]["root"] == "assets?"
 
 
-def test_doc_reading_is_contained(project, code_root):
-    p = Project(project, code_root)
-    d = p.doc("store", "epics/EPIC-0001-ship-the-viewer.md")
+def test_doc_reading_is_contained(project, asset_root):
+    p = Project(project, asset_root)
+    d = p.doc("sdlc", "epics/EPIC-0001-ship-the-viewer.md")
     assert d["exists"] and d["kind"] == "markdown" and d["entity"] == "EPIC-0001"
     assert d["frontmatter"]["id"] == "EPIC-0001" and d["raw"].startswith("---")
-    assert p.doc("code", "docs/guide.md")["text"].startswith("# Guide")
-    assert p.doc("store", "docs/guide.md", fallback=True)["root"] == "code"
-    assert p.doc("store", "../code/docs/guide.md")["exists"] is False
+    assert p.doc("assets", "docs/guide.md")["text"].startswith("# Guide")
+    assert p.doc("sdlc", "docs/guide.md", fallback=True)["root"] == "assets"
+    assert p.doc("sdlc", "../assets/docs/guide.md")["exists"] is False
     (project / ".git").mkdir()
     (project / ".git" / "config").write_text("[core]\n")
-    assert p.doc("store", ".git/config")["exists"] is False
+    assert p.doc("sdlc", ".git/config")["exists"] is False
     (project / "blob.bin").write_bytes(b"\x00\x01binary")
-    assert p.doc("store", "blob.bin")["kind"] == "binary"
+    assert p.doc("sdlc", "blob.bin")["kind"] == "binary"
 
 
 def test_store_documents_list_generated_views_first(project):
@@ -102,7 +102,7 @@ def test_a_nested_store_is_its_own_project(project, tmp_path):
     p = Project(project)
     assert not any(d["path"].startswith("examples/") for d in p.store_docs)
     assert len(p.store_model) == 5
-    assert Project(inner / "epics").store == inner.resolve()
+    assert Project(inner / "epics").sdlc_root == inner.resolve()
 
 
 def test_refresh_reloads_and_keeps_the_last_good_model_on_failure(project):
@@ -121,14 +121,14 @@ def test_refresh_reloads_and_keeps_the_last_good_model_on_failure(project):
     assert p.info()["load_error"] == p.load_error
 
 
-def test_info_and_snapshot_hide_local_paths(project, code_root):
-    p = Project(project, code_root)
+def test_info_and_snapshot_hide_local_paths(project, asset_root):
+    p = Project(project, asset_root)
     info = p.info()
     assert info["backend"]["kind"] == "workdir" and info["readonly"]
     assert info["unparseable"] == [] and info["duplicates"] == []
     snap = p.snapshot()
-    assert snap["project"]["store"] == "proj" and snap["project"]["code_root"] == "code"
-    assert "code:docs/guide.md" in snap["docs"]
+    assert snap["project"]["sdlc_root"] == "proj" and snap["project"]["asset_root"] == "assets"
+    assert "assets:docs/guide.md" in snap["docs"]
     assert set(snap["details"]) == {r["id"] for r in snap["entities"]}
 
 
@@ -144,3 +144,23 @@ def test_helpers():
     from szsdlc.model import Progress
     out = plain(Aggregate(children=2, terminal=1, tasks=Progress(3, 4)))
     assert out["percent"] == 50 and out["tasks"]["done"] == 3
+
+
+
+def test_the_old_root_ids_are_still_accepted(project, asset_root):
+    """`store` and `code` were the root ids before WI-0069; copied links and old callers still use them."""
+    p = Project(project, asset_root)
+    assert p.doc("code", "docs/guide.md")["root"] == "assets"
+    assert p.doc("store", "epics/EPIC-0001-ship-the-viewer.md")["root"] == "sdlc"
+    assert p.doc("store", "docs/guide.md", fallback=True)["root"] == "assets"
+
+
+def test_payloads_speak_the_glossary(project, asset_root):
+    """No payload says "code root" or a bare "store" any more (WI-0069)."""
+    p = Project(project, asset_root)
+    info = p.info()
+    assert info["sdlc_root"] == str(project.resolve()) and info["asset_root"] == str(asset_root.resolve())
+    assert info["sdlc_store_dir"] == str(project.resolve())  # workdir: the store dir is the sdlc root
+    assert not {"store", "code_root"} & set(info)
+    docs = p.entity("WI-0001")["documents"]
+    assert {d["root"] for d in docs if d.get("root")} <= {"sdlc", "assets", "assets?", "web"}

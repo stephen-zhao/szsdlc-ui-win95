@@ -9,9 +9,9 @@ from szsdlc_ui_win95.services import Conflict, Forbidden, Invalid, NotFound, Vie
 
 
 @pytest.fixture
-def service(project, code_root):
+def service(project, asset_root):
     registry = Registry()
-    registry.add(project, code_root)
+    registry.add(project, asset_root)
     return ViewerService(registry)
 
 
@@ -20,7 +20,7 @@ def test_reads(service):
     assert [p["id"] for p in service.projects()] == ["proj"]
     assert service.info("proj")["entity_count"] == 5
     assert service.entity("proj", "wi-1")["id"] == "WI-0001"
-    assert service.doc("proj", "code", "docs/guide.md")["exists"]
+    assert service.doc("proj", "assets", "docs/guide.md")["exists"]
 
 
 def test_refusals_are_typed_not_status_codes(service, tmp_path):
@@ -48,8 +48,8 @@ def test_no_open_is_refused_before_anything_is_read(project):
 
 def test_raw_is_contained_and_never_active(service, project):
     (project / "page.html").write_text("<script>alert(1)</script>", encoding="utf-8")
-    assert service.raw("proj", "store", "page.html").content_type.startswith("text/plain")
-    assert service.raw("proj", "store", "../../etc/passwd") is None
+    assert service.raw("proj", "sdlc", "page.html").content_type.startswith("text/plain")
+    assert service.raw("proj", "sdlc", "../../etc/passwd") is None
 
 
 def test_refresh_reports_a_conflict_as_such(service, monkeypatch):

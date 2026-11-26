@@ -1,10 +1,12 @@
 """Supporting documents: finding the ones an item mentions, and reading them safely.
 
-Two roots exist. The **store** is where the project is kept. The **code root** is
-the repository the project describes, where out-of-tree documents live: the same
-tree for a `workdir` project, and the directory the viewer was pointed at for a
-store kept elsewhere. Every path is contained to its root, `.git` is never read,
-and nothing is ever served as active content.
+Two roots exist, named as szsdlc's glossary names them. The **project sdlc root**
+(root id `sdlc`) holds the project's `.szsdlc/` and its records. A **project
+asset root** (root id `assets`) holds the code and other assets the project
+describes: the same directory for a `workdir` project, and the directory the
+viewer was pointed at when the records are kept elsewhere. Every path is
+contained to its root, `.git` is never read, and nothing is ever served as
+active content.
 """
 
 from __future__ import annotations
@@ -68,15 +70,24 @@ def references(text: str) -> list[str]:
     return list(dict.fromkeys(found))
 
 
+#: The root ids before WI-0069, still accepted on input (`?root=`, copied links).
+LEGACY_ROOTS = {"store": "sdlc", "code": "assets", "code?": "assets?"}
+
+
+def normalize_root(root: str) -> str:
+    """A root id in today's words: `sdlc` or `assets`, whatever spelling arrived."""
+    return LEGACY_ROOTS.get(root, root)
+
+
 class Roots:
     """The two places a document can live, and safe access to both."""
 
-    def __init__(self, store: Path, code_root: Path | None):
-        self.store = store
-        self.code_root = code_root
+    def __init__(self, sdlc_root: Path, asset_root: Path | None):
+        self.sdlc_root = sdlc_root
+        self.asset_root = asset_root
 
     def base(self, root: str) -> Path | None:
-        return {"store": self.store, "code": self.code_root}.get(root)
+        return {"sdlc": self.sdlc_root, "assets": self.asset_root}.get(normalize_root(root))
 
     def safe_path(self, root: str, rel: str) -> Path | None:
         """The file `rel` names under `root`, or None if it escapes, is in .git, or the root is unset."""
@@ -93,31 +104,33 @@ class Roots:
         return p
 
     def resolve(self, ref: str, mentioned_in: str | None) -> dict:
-        """Where a reference lands: next to its mention, then the store root, then the code root."""
+        """Where a reference lands: next to its mention, then the sdlc root, then the asset root."""
         # A link relative to its file means the same path under either root:
-        # for a workdir project the two are one tree, and for a relocated store
-        # the code repository mirrors the paths documents were written against.
+        # for a workdir project the two are one directory, and when the records
+        # are kept elsewhere the asset root mirrors the paths documents were
+        # written against.
         paths = []
         if mentioned_in and not ref.startswith("/"):
             paths.append(posixpath.normpath(posixpath.join(posixpath.dirname(mentioned_in), ref)))
         paths.append(posixpath.normpath(ref.lstrip("/")))
         paths = list(dict.fromkeys(paths))
-        roots = ["store"] + (["code"] if self.code_root else [])
+        roots = ["sdlc"] + (["assets"] if self.asset_root else [])
         for root in roots:
             for path in paths:
                 p = self.safe_path(root, path)
                 if p and p.is_file():
                     return {"root": root, "path": path, "exists": True, "size": p.stat().st_size}
-        return {"root": "code" if self.code_root else "code?", "path": paths[0], "exists": False}
+        return {"root": "assets" if self.asset_root else "assets?", "path": paths[0], "exists": False}
 
     def read(self, root: str, rel: str, fallback: bool = False) -> dict:
         """One document as the API returns it. Front matter is split out; `raw` is the whole file."""
+        root = normalize_root(root)
         rel = posixpath.normpath(str(rel).lstrip("/"))
         p = self.safe_path(root, rel)
-        if (p is None or not p.is_file()) and fallback and root == "store" and self.code_root:
-            root, p = "code", self.safe_path("code", rel)
+        if (p is None or not p.is_file()) and fallback and root == "sdlc" and self.asset_root:
+            root, p = "assets", self.safe_path("assets", rel)
         if p is None or not p.is_file():
-            return {"root": root, "path": rel, "exists": False, "code_root": bool(self.code_root)}
+            return {"root": root, "path": rel, "exists": False, "asset_root": bool(self.asset_root)}
         raw = p.read_bytes()
         if b"\x00" in raw[:4096] or len(raw) > MAX_TEXT_BYTES:
             return {"root": root, "path": rel, "exists": True, "kind": "binary", "size": len(raw)}

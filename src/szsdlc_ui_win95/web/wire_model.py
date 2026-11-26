@@ -35,6 +35,9 @@ class OpenProjectRequest(BaseModel):
     location: str | None = None
     #: The 0.1 name for `location`, still accepted.
     store: str | None = None
+    #: The project asset root: the code and other assets the project describes.
+    asset_root: str | None = None
+    #: The 0.1 name for `asset_root`, still accepted for one release.
     code_root: str | None = None
 
 

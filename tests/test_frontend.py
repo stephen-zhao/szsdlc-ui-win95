@@ -67,14 +67,14 @@ def _playwright_available() -> bool:
     return subprocess.run(["node", "-e", "require('playwright')"], capture_output=True).returncode == 0
 
 
-def test_smoke_in_a_real_browser(project, code_root):
+def test_smoke_in_a_real_browser(project, asset_root):
     if not _playwright_available():
         # CI's browser job sets this, so a broken install fails instead of passing as a skip.
         if os.environ.get("SZUI_REQUIRE_BROWSER"):
             pytest.fail("SZUI_REQUIRE_BROWSER is set but node cannot require('playwright')")
         pytest.skip("node playwright is not installed")
     registry = Registry()
-    registry.add(project, code_root)
+    registry.add(project, asset_root)
     server = make_server(registry, "127.0.0.1", 0)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
@@ -106,7 +106,7 @@ const { chromium } = require('playwright');
 """
 
 
-def test_a_snapshot_has_no_refresh_button(project, code_root, tmp_path):
+def test_a_snapshot_has_no_refresh_button(project, asset_root, tmp_path):
     """A snapshot has nothing to refresh from (WI-0055)."""
     if not _playwright_available():
         if os.environ.get("SZUI_REQUIRE_BROWSER"):
@@ -115,9 +115,19 @@ def test_a_snapshot_has_no_refresh_button(project, code_root, tmp_path):
     from szsdlc_ui_win95 import export
 
     registry = Registry()
-    registry.add(project, code_root)
+    registry.add(project, asset_root)
     out = export.write(registry, tmp_path / "snap.html")
     script = tmp_path / "check.js"
     script.write_text(SNAPSHOT_CHECK, encoding="utf-8")
     result = subprocess.run(["node", str(script), out.as_uri()], capture_output=True, text=True, timeout=120)
     assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_visible_text_speaks_the_glossary():
+    """WI-0069: no user-visible string says "code root", "in tree" or "where the project is kept"."""
+    retired = re.compile(r"code root|in tree|out of tree|where (?:the project|it) is kept", re.IGNORECASE)
+    for name in ("app.js", "index.html"):
+        text = (STATIC / name).read_text(encoding="utf-8")
+        strings = re.findall(r"'[^'\n]*'|\"[^\"\n]*\"|`[^`\n]*`", text)
+        hits = [s for s in strings if retired.search(s)]
+        assert not hits, f"{name}: {hits[:3]}"

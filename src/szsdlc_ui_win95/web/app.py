@@ -76,9 +76,9 @@ def create_app(service: ViewerService, *, allowed_hosts: frozenset[str], token: 
         if route == "docs":
             return send_json(service.docs(pid))
         if route == "doc":
-            return send_json(service.doc(pid, q("root", "store"), q("path"), q("fallback") == "1"))
+            return send_json(service.doc(pid, q("root", "sdlc"), q("path"), q("fallback") == "1"))
         if route == "raw":
-            found = service.raw(pid, q("root", "store"), q("path"))
+            found = service.raw(pid, q("root", "sdlc"), q("path"))
             if found is None:
                 return send(HTTPStatus.NOT_FOUND, b"not found", "text/plain")
             return send(HTTPStatus.OK, found.data, found.content_type)

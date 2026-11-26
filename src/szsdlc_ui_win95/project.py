@@ -68,11 +68,11 @@ def plain(value):
 class Project:
     """A project the viewer serves. Reloads itself when its files change."""
 
-    def __init__(self, location, code_root: Path | None = None, excludes=(), *, update: bool = True):
+    def __init__(self, location, asset_root: Path | None = None, excludes=(), *, update: bool = True):
         """Open the project at `location`: a folder here, or a place a backend keeps one (a git URL).
 
-        The store is materialized if it is kept elsewhere and not yet on this
-        computer, and, when `update` is set, brought up to date if that is safe.
+        The project sdlc store dir is materialized if it is not on this computer
+        yet, and, when `update` is set, brought up to date if that is safe.
         """
         resolved = locations.resolve(location)
         self.location = resolved.location
@@ -80,13 +80,18 @@ class Project:
         self.backend = resolved.backend
         self.relocated = sz_backend.relocates(self.backend)
         self.start = resolved.start or resolved.root
-        if code_root is None and self.relocated and resolved.start is not None:
-            # A store kept elsewhere describes the repository the viewer was pointed at.
-            code_root = sz_backend.project_directory(resolved.start)
+        if asset_root is None and self.relocated and resolved.start is not None:
+            # Records kept elsewhere describe the folder the viewer was pointed at.
+            asset_root = locations.asset_root_of(resolved.start)
         self.update_warning = locations.bring_up_to_date(self.backend) if update else None
-        self.store = resolved.root
-        self.code_root = Path(code_root).resolve() if code_root else None
-        self.roots = Roots(self.store, self.code_root)
+        #: The project sdlc root: the directory holding `.szsdlc/` and the records.
+        self.sdlc_root = resolved.root
+        #: The local directory the sdlc backend reads and writes; the sdlc root is
+        #: inside it, and two projects can share one (a clone, two subdirectories).
+        self.sdlc_store_dir = Path(locations.sdlc_store_dir(self.backend)).resolve()
+        #: The project asset root: the code and other assets the project describes.
+        self.asset_root = Path(asset_root).resolve() if asset_root else None
+        self.roots = Roots(self.sdlc_root, self.asset_root)
         self.excludes = SKIP_DIRS | set(excludes)
         self.load_error: str | None = None
         self._lock = threading.RLock()
@@ -99,7 +104,7 @@ class Project:
     # -- loading -------------------------------------------------------------
     def _fingerprint(self):
         count, latest = 0, 0.0
-        for root, dirs, files in os.walk(self.store):
+        for root, dirs, files in os.walk(self.sdlc_root):
             dirs[:] = [d for d in dirs if d not in self.excludes and (not d.startswith(".") or d == ".szsdlc")]
             for name in files:
                 try:
@@ -123,20 +128,20 @@ class Project:
             self._stamp = stamp
 
     def refresh_from_backend(self, replace: bool = False) -> dict:
-        """Take the latest from where the project is kept, then reload. Never sends anything.
+        """Take the sdlc backend's latest, then reload. Never sends anything.
 
         szsdlc's `refresh` replaces local state that differs without asking, so
         the asking is done here: unless `replace` is set, a copy with unsent
         changes is left untouched and `UnsentChanges` is raised. A project kept
         in a folder here has nothing to take, so this only re-reads its files.
         """
-        if not replace and self.backend.has_local_changes():
+        if not replace and locations.has_unsent_changes(self.backend):
             raise UnsentChanges(
-                "This copy has changes not yet sent to where the project is kept. "
+                "This copy has unsent changes. "
                 "Refreshing replaces them with the latest; szsdlc keeps what it replaces.")
         report = locations.refresh(self.backend)
         if not report.ok:
-            raise ProjectError(f"Could not refresh from where the project is kept: {report.problem}"
+            raise ProjectError(f"Could not refresh from its sdlc backend: {report.problem}"
                                + (f" Fix: {report.fix}" if report.fix else ""))
         stamp = self._fingerprint()
         with self._lock:
@@ -153,7 +158,7 @@ class Project:
         return {"arrived": bool(report.incoming), "replaced": bool(report.replaced), "note": report.note}
 
     def _load(self) -> None:
-        cfg = sz_config.load(self.store)
+        cfg = sz_config.load(self.sdlc_root)
         store = sz_model.load_all(cfg)
         graph = sz_graph.build(cfg, store)
         by_key = {norm_id(e.id.text): e for e in store}
@@ -186,14 +191,14 @@ class Project:
     def _rel(self, p) -> str:
         p = Path(p)
         try:
-            return p.resolve().relative_to(self.store).as_posix()
+            return p.resolve().relative_to(self.sdlc_root).as_posix()
         except ValueError:
             return p.as_posix()
 
     def _owned(self, f: Path) -> bool:
         """True when `f` belongs to this store, not to a project nested inside it."""
         for parent in f.parents:
-            if parent == self.store:
+            if parent == self.sdlc_root:
                 return True
             if (parent / ".szsdlc" / "config.yml").is_file():
                 return False
@@ -254,11 +259,12 @@ class Project:
     def info(self) -> dict:
         project = self.cfg.data.get("project") or {}
         return {
-            "name": project.get("name") or (locations.store_name(self.store) if self.relocated else self.store.name),
+            "name": project.get("name") or (locations.store_name(self.sdlc_root) if self.relocated else self.sdlc_root.name),
             "location": locations.display(self.location) if self.remote else str(self.start),
             "update_warning": self.update_warning,
-            "store": str(self.store),
-            "code_root": str(self.code_root) if self.code_root else None,
+            "sdlc_root": str(self.sdlc_root),
+            "sdlc_store_dir": str(self.sdlc_store_dir),
+            "asset_root": str(self.asset_root) if self.asset_root else None,
             "backend": {"kind": getattr(self.backend, "type", "workdir"), "summary": self.backend.summary(),
                         "relocated": self.relocated},
             "schema_source": "szsdlc", "szsdlc_version": szsdlc.__version__,
@@ -313,15 +319,15 @@ class Project:
     def documents(self, e) -> list[dict]:
         path = self._rel(e.path)
         name = path.rsplit("/", 1)[-1]
-        docs = [{"name": f"{name} § {e.id.text}" if e.layout == "section" else name, "kind": "record", "root": "store",
+        docs = [{"name": f"{name} § {e.id.text}" if e.layout == "section" else name, "kind": "record", "root": "sdlc",
                  "path": path, "exists": True, "size": len(e.body.encode())}]
         home = self._rel(e.home) if e.home else None
         artifacts = [self._rel(p) for p in e.artifact_files()]
         for a in artifacts:
-            docs.append({"name": a[len(home) + 1:] if home else a, "kind": "artifact", "root": "store", "path": a,
-                         "exists": True, "size": (self.store / a).stat().st_size})
+            docs.append({"name": a[len(home) + 1:] if home else a, "kind": "artifact", "root": "sdlc", "path": a,
+                         "exists": True, "size": (self.sdlc_root / a).stat().st_size})
         seen = {d["path"] for d in docs}
-        sources = [(path, e.body)] + [(a, (self.store / a).read_text(encoding="utf-8", errors="replace"))
+        sources = [(path, e.body)] + [(a, (self.sdlc_root / a).read_text(encoding="utf-8", errors="replace"))
                                       for a in artifacts if a.endswith((".md", ".markdown"))]
         for mentioned_in, text in sources:
             for ref in references(text):
@@ -333,29 +339,29 @@ class Project:
                     continue
                 hit = self.roots.resolve(ref, mentioned_in)
                 key = f"{hit['root']}:{hit['path']}"
-                if key in seen or (hit["root"] == "store" and hit["path"] in seen):
+                if key in seen or (hit["root"] == "sdlc" and hit["path"] in seen):
                     continue
                 seen.add(key)
-                target = self.by_path.get(hit["path"]) if hit["root"] == "store" else None
+                target = self.by_path.get(hit["path"]) if hit["root"] == "sdlc" else None
                 docs.append({"name": ref, "kind": "entity" if target else "reference",
                              "entity": target.id.text if target else None, "mentioned_in": mentioned_in, **hit})
         return docs
 
     def doc(self, root: str, rel: str, fallback: bool = False) -> dict:
         out = self.roots.read(root, rel, fallback)
-        if out.get("exists") and out["root"] == "store":
+        if out.get("exists") and out["root"] == "sdlc":
             target = self.by_path.get(out["path"])
             out["entity"] = target.id.text if target else None
         return out
 
     def _store_documents(self) -> list[dict]:
-        """Generated views and records first, then any other Markdown in the store."""
+        """Generated views and records first, then any other Markdown in the project sdlc root."""
         outputs = {self._rel(self.cfg.view_path(n)) for n in self.cfg.views}
         outputs |= {self._rel(self.cfg.record_path(n)) for n in self.cfg.records}
         entity_files = {self._rel(e.path) for e in self.store_model}
         homes = tuple(self._rel(e.home) + "/" for e in self.store_model if e.home)
         docs = []
-        for f in sorted(self.store.rglob("*.md")):
+        for f in sorted(self.sdlc_root.rglob("*.md")):
             rel = self._rel(f)
             if any(part.startswith(".") or part in self.excludes for part in Path(rel).parts) or not self._owned(f):
                 continue
@@ -363,7 +369,7 @@ class Project:
                 continue
             text = f.read_text(encoding="utf-8", errors="replace")
             title = next((line[2:].strip() for line in text.splitlines() if line.startswith("# ")), f.stem)
-            docs.append({"root": "store", "path": rel, "title": title,
+            docs.append({"root": "sdlc", "path": rel, "title": title,
                          "generated": rel in outputs or GENERATED_MARK in text[:400]})
         return sorted(docs, key=lambda d: (not d["generated"], d["path"]))
 
@@ -371,17 +377,18 @@ class Project:
     def snapshot(self) -> dict:
         """Everything the frontend asks for, precomputed, with no local paths in it."""
         docs = {}
-        for f in sorted(self.store.rglob("*")):
+        for f in sorted(self.sdlc_root.rglob("*")):
             rel = Path(self._rel(f))
             if (f.is_file() and f.suffix.lower() in (".md", ".markdown", ".yml", ".yaml") and self._owned(f)
                     and not any((part.startswith(".") and part != ".szsdlc") or part in self.excludes for part in rel.parts)):
-                docs[f"store:{rel.as_posix()}"] = self.doc("store", rel.as_posix())
+                docs[f"sdlc:{rel.as_posix()}"] = self.doc("sdlc", rel.as_posix())
         details = {e.id.text: self.entity(e.id.text) for e in self.store_model}
-        for detail in details.values():  # out-of-tree documents the items actually reference
+        for detail in details.values():  # asset-root documents the items actually reference
             for d in detail["documents"]:
-                if d.get("root") == "code" and d.get("exists"):
-                    docs.setdefault(f"code:{d['path']}", self.doc("code", d["path"]))
-        info = {**self.info(), "store": self.store.name, "code_root": self.code_root.name if self.code_root else None}
+                if d.get("root") == "assets" and d.get("exists"):
+                    docs.setdefault(f"assets:{d['path']}", self.doc("assets", d["path"]))
+        info = {**self.info(), "sdlc_root": self.sdlc_root.name, "sdlc_store_dir": self.sdlc_store_dir.name,
+                "asset_root": self.asset_root.name if self.asset_root else None}
         if not self.remote:  # a remote location is already fit to show; a local one is a path on this machine
             info["location"] = self.start.name
         return {"generated_at": _dt.date.today().isoformat(), "project": info, "schema": self.schema,

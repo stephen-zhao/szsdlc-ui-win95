@@ -9,16 +9,16 @@ from szsdlc_ui_win95 import cli, export
 from szsdlc_ui_win95.registry import Registry
 
 
-def test_export_is_self_contained_and_hides_local_paths(project, code_root, tmp_path):
+def test_export_is_self_contained_and_hides_local_paths(project, asset_root, tmp_path):
     registry = Registry()
-    registry.add(project, code_root)
+    registry.add(project, asset_root)
     html = export.render(registry)
     assert "window.SZ_SNAPSHOT=" in html and "<!doctype html>" in html.lower()
     assert 'src="vendor/' not in html and 'href="win95.css"' not in html
     assert '<meta name="viewer-token"' not in html  # a snapshot has no server to hold a token for
     assert str(tmp_path) not in html
     snap = json.loads(re.search(r"window\.SZ_SNAPSHOT=(\{.*?\});</script>", html, re.S).group(1).replace("<\\/", "</"))
-    assert snap["meta"]["viewer"] == "szsdlc-ui-win95" and snap["projects"][0]["store"] == "proj"
+    assert snap["meta"]["viewer"] == "szsdlc-ui-win95" and snap["projects"][0]["sdlc_root"] == "proj"
     assert "WI-0001" in snap["data"]["proj"]["details"]
     fragment = export.render(registry, fragment=True)
     head = fragment.lstrip()[:200].lower()  # the vendored libraries mention "<html" as strings; look at the top

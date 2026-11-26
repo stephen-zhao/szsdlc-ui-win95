@@ -52,14 +52,14 @@ class ViewerService:
             raise Forbidden("Opening projects is disabled",
                             "This viewer was started with --no-open; restart it with the project as an argument.")
 
-    def open_project(self, location: str, code_root: str | None = None) -> dict:
+    def open_project(self, location: str, asset_root: str | None = None) -> dict:
         """Open a project: a folder here, or where a backend keeps one, such as a repository URL."""
         self.ensure_can_open()
         where = location.strip()
         if not where:
             raise Invalid("No location given", "Name a folder on this computer, or a repository URL.")
         try:
-            pid = self.registry.add(where, Path(code_root) if code_root else None, persist=True)
+            pid = self.registry.add(where, Path(asset_root) if asset_root else None, persist=True)
         except ProjectError as err:
             raise Invalid("Cannot open that project", str(err),
                           fix="Give a folder on this computer that holds a szsdlc project, or where one "

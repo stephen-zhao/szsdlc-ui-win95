@@ -13,9 +13,9 @@ from szsdlc_ui_win95.server import CSP, make_server
 
 
 @pytest.fixture
-def served(project, code_root):
+def served(project, asset_root):
     registry = Registry()
-    registry.add(project, code_root)
+    registry.add(project, asset_root)
     server = make_server(registry, "127.0.0.1", 0)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -52,7 +52,7 @@ def test_meta_projects_and_project_routes(served):
     assert call(served, "GET", "/api/p/proj/entities/wi-1")[2]["id"] == "WI-0001"
     assert call(served, "GET", "/api/p/proj/roadmaps")[2][0]["horizons"][0]["items"] == ["WI-0001"]
     assert call(served, "GET", "/api/p/proj/docs")[2][0]["generated"]
-    assert call(served, "GET", "/api/p/proj/doc?root=code&path=docs/guide.md")[2]["exists"]
+    assert call(served, "GET", "/api/p/proj/doc?root=assets&path=docs/guide.md")[2]["exists"]
 
 
 def test_not_found_routes_are_problems(served):
@@ -78,10 +78,10 @@ def test_index_carries_the_launch_token_and_strict_headers(served):
 
 def test_raw_never_serves_active_content_and_stays_contained(served, project):
     (project / "page.html").write_text("<script>alert(1)</script>", encoding="utf-8")
-    status, resp, _ = call(served, "GET", "/api/p/proj/raw?root=store&path=page.html")
+    status, resp, _ = call(served, "GET", "/api/p/proj/raw?root=sdlc&path=page.html")
     assert status == 200 and resp.getheader("Content-Type").startswith("text/plain")
-    assert call(served, "GET", "/api/p/proj/raw?root=store&path=../../etc/passwd")[0] == 404
-    assert call(served, "GET", "/api/p/proj/raw?root=store&path=nope.png")[0] == 404
+    assert call(served, "GET", "/api/p/proj/raw?root=sdlc&path=../../etc/passwd")[0] == 404
+    assert call(served, "GET", "/api/p/proj/raw?root=sdlc&path=nope.png")[0] == 404
 
 
 def test_opening_a_project_needs_token_and_origin(served, tmp_path):
@@ -211,3 +211,19 @@ def test_http_server_is_no_longer_used():
             names = ([a.name for a in node.names] if isinstance(node, ast.Import)
                      else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
             assert not any(n == "http.server" for n in names), path
+
+
+
+def test_old_spellings_are_accepted_on_input(served, project, tmp_path):
+    """WI-0069: `?root=store`/`?root=code` and an Open project body's `code_root` still work."""
+    assert call(served, "GET", "/api/p/proj/doc?root=code&path=docs/guide.md")[2]["root"] == "assets"
+    (project / "page.html").write_text("x", encoding="utf-8")
+    assert call(served, "GET", "/api/p/proj/raw?root=store&path=page.html")[0] == 200
+    other = tmp_path / "other"
+    other.mkdir()
+    szsdlc(other, "init")
+    assets = tmp_path / "other-assets"
+    assets.mkdir()
+    status, _, body = call(served, "POST", "/api/projects", {"location": str(other), "code_root": str(assets)},
+                           {"X-Viewer-Token": token(served)})
+    assert status == 201 and body["asset_root"] == str(assets.resolve()) and "code_root" not in body

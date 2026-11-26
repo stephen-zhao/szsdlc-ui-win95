@@ -31,24 +31,24 @@ def test_refuses_what_is_not_a_project(tmp_path):
     with pytest.raises(ProjectError):
         r.add(tmp_path)
     with pytest.raises(ProjectError, match="not a directory"):
-        r.add(tmp_path, code_root=tmp_path / "missing")
+        r.add(tmp_path, asset_root=tmp_path / "missing")
 
 
-def test_summary_public_form_drops_local_paths(project, code_root):
+def test_summary_public_form_drops_local_paths(project, asset_root):
     r = Registry()
-    pid = r.add(project, code_root)
+    pid = r.add(project, asset_root)
     full, public = r.summary(pid, r.get(pid)), r.summary(pid, r.get(pid), public=True)
-    assert full["store"] == str(project.resolve()) and public["store"] == "proj"
-    assert public["code_root"] == "code" and full["entity_count"] == 5 and full["type_count"] == 6
+    assert full["sdlc_root"] == str(project.resolve()) and public["sdlc_root"] == "proj"
+    assert public["asset_root"] == "assets" and full["entity_count"] == 5 and full["type_count"] == 6
 
 
-def test_projects_file_round_trip(project, code_root, tmp_path):
+def test_projects_file_round_trip(project, asset_root, tmp_path):
     path = tmp_path / "viewer.yml"
     r = Registry(projects_file=path)
-    r.add(project, code_root, persist=True)
+    r.add(project, asset_root, persist=True)
     again = Registry(projects_file=path)
     again.load()
-    assert list(again.projects) == ["proj"] and again.get("proj").code_root == code_root.resolve()
+    assert list(again.projects) == ["proj"] and again.get("proj").asset_root == asset_root.resolve()
     path.write_text("- store: /nowhere/at/all\n- {}\n", encoding="utf-8")
     broken = Registry(projects_file=path)
     broken.load()  # bad entries are skipped, not fatal
@@ -63,3 +63,15 @@ def test_registered_stores_come_from_szsdlc_registry(project, isolated_szsdlc, t
     r = Registry()
     r.add_registered()
     assert list(r.projects) == ["proj"]
+
+
+
+def test_a_projects_file_written_with_code_root_still_loads(project, asset_root, tmp_path):
+    """WI-0069: the file is written with `asset_root`; one with the old `code_root` still reads."""
+    path = tmp_path / "projects.yml"
+    path.write_text(f"- location: {project}\n  code_root: {asset_root}\n", encoding="utf-8")
+    r = Registry(projects_file=path)
+    r.load()
+    assert r.get("proj").asset_root == asset_root.resolve()
+    r.save()
+    assert "asset_root:" in path.read_text(encoding="utf-8") and "code_root" not in path.read_text(encoding="utf-8")
