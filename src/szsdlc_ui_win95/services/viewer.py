@@ -1,4 +1,4 @@
-"""The viewer's operations: reading projects, opening one, refreshing one."""
+"""The viewer's operations: reading projects, opening and refreshing one, and editing one through szsdlc."""
 
 from __future__ import annotations
 
@@ -9,12 +9,14 @@ from pathlib import Path
 from typing import Any
 
 import szsdlc
+from szsdlc import errors as sz_errors
+from szsdlc import ops as sz_ops
 
 from .. import __version__
 from ..errors import UnsentChanges
 from ..project import Project, ProjectError
 from ..registry import Registry
-from .errors import Conflict, Forbidden, Invalid, NotFound
+from .errors import Conflict, Forbidden, Invalid, NotFound, Rejected, ServiceError, Stale
 
 #: Content types never served from a store as themselves: they would be active content.
 ACTIVE = ("text/html", "image/svg+xml", "application/xhtml+xml")
@@ -30,18 +32,20 @@ class Raw:
 class ViewerService:
     """Every operation the viewer offers, over the projects one viewer serves.
 
-    Constructed with what it needs (the registry, and whether opening projects
-    is allowed), so any interface can drive it and a test can build one directly.
+    Constructed with what it needs (the registry, whether opening projects is
+    allowed, and whether editing is), so any interface can drive it and a test
+    can build one directly.
     """
 
-    def __init__(self, registry: Registry, *, allow_open: bool = True):
+    def __init__(self, registry: Registry, *, allow_open: bool = True, read_only: bool = False):
         self.registry = registry
         self.allow_open = allow_open
+        self.read_only = read_only
 
     # -- the viewer ----------------------------------------------------------
     def meta(self) -> dict:
         return {"viewer": "szsdlc-ui-win95", "version": __version__,
-                "szsdlc_version": szsdlc.__version__, "readonly": True}
+                "szsdlc_version": szsdlc.__version__, "readonly": self.read_only}
 
     def projects(self) -> list[dict]:
         return self.registry.listing()
@@ -95,7 +99,7 @@ class ViewerService:
         return project
 
     def info(self, pid: str) -> dict:
-        return self.project(pid).info()
+        return {**self.project(pid).info(), "readonly": self.read_only}
 
     def schema(self, pid: str) -> dict:
         return self.project(pid).schema
@@ -127,3 +131,78 @@ class ViewerService:
         if ctype in ACTIVE or ctype.endswith("javascript"):
             ctype = "text/plain; charset=utf-8"
         return Raw(p.read_bytes(), ctype)
+
+    # -- one project's edits, through szsdlc's operations ----------------------
+    def ensure_can_edit(self) -> None:
+        """Refuse when this viewer was started with --read-only; asked first, before anything is read."""
+        if self.read_only:
+            raise Forbidden("Editing is disabled",
+                            "This viewer was started with --read-only; restart it without the flag to edit.")
+
+    def set(self, pid: str, ref: str, values: dict[str, str], *, expect: str,
+            force: bool = False, reason: str | None = None) -> dict:
+        """Set fields and the status through `szsdlc set`, refused if the item changed since `expect`."""
+        project = self._editable(pid)
+        if not values:
+            raise Invalid("Nothing to set", "Name at least one field and its value.")
+        result = _through_szsdlc(lambda: project.edits.set(ref, values, expect=expect, force=force, reason=reason))
+        return self._after_edit(project, result)
+
+    def tag(self, pid: str, ref: str, tags: list[str], *, expect: str, add: bool = True) -> dict:
+        """Add (`szsdlc tag`) or remove (`szsdlc untag`) tags, refused if the item changed since `expect`."""
+        project = self._editable(pid)
+        cleaned = [t.strip() for t in tags if t and t.strip()]
+        if not cleaned:
+            raise Invalid("No tag given", "Name at least one tag.")
+        write = project.edits.tag if add else project.edits.untag
+        result = _through_szsdlc(lambda: write(ref, cleaned, expect=expect))
+        return self._after_edit(project, result)
+
+    def send(self, pid: str) -> dict:
+        """Send unsent changes, once, through `szsdlc sync`: one record for all of them."""
+        project = self._editable(pid)
+        result = _through_szsdlc(project.edits.send, title="Could not send changes")
+        return {"changed": list(result.changed), "arrived": result.incoming, "sent": result.outgoing,
+                "changes": project.edits.changes()}
+
+    def changes(self, pid: str) -> dict:
+        """Whether the project has unsent changes, and the ones this viewer made."""
+        return self.known(pid).edits.changes()
+
+    def findings(self, pid: str) -> dict:
+        """`szsdlc validate`, as data."""
+        project = self.project(pid)
+        return _through_szsdlc(project.edits.findings, title="Cannot validate")
+
+    def _editable(self, pid: str):
+        self.ensure_can_edit()
+        return self.known(pid)
+
+    def _after_edit(self, project, result) -> dict:
+        """The post-state: the operation's result, the item as it is now, what is unsent, the finding counts."""
+        found = project.entity(result.id) or {}
+        try:
+            counts = project.edits.findings(limit=1)  # the counts cover every finding
+            findings = {"errors": counts["errors"], "warnings": counts["warnings"]}
+        except sz_errors.SzsdlcError:
+            findings = None
+        return {"result": result.to_dict(), "entity": found, "changes": project.edits.changes(),
+                "findings": findings}
+
+
+#: How each szsdlc refusal class is refused here, with the title a person sees.
+REFUSALS: dict[str, tuple[type[ServiceError], str]] = {
+    "stale_precondition": (Stale, "Changed on disk"),
+    "refused": (Rejected, "Not allowed"),
+    "unknown_reference": (NotFound, "No such entity"),
+}
+
+
+def _through_szsdlc(run, *, title: str = "Not a valid change"):
+    """Run a szsdlc operation, turning its refusal into the service's, with the refusal kept as data."""
+    try:
+        return run()
+    except sz_errors.SzsdlcError as err:
+        data = sz_ops.refusal_to_data(err)
+        cls, named = REFUSALS.get(data["class"], (Invalid, title))
+        raise cls(named if data["class"] in REFUSALS else title, err.problem, fix=err.fix, refusal=data) from None

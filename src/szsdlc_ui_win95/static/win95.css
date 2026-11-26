@@ -445,3 +445,21 @@ button.chip { cursor: pointer; }
   #tray .clock { display: none; }
 }
 @media (min-width: 641px) { .only-phone { display: none !important; } }
+
+/* ---- editing (WI-0061): controls sit where the data is shown ---- */
+button.pill.pick { border: 0; cursor: pointer; font: inherit; font-size: 11px; font-weight: bold; display: inline-flex; gap: 4px; align-items: center; }
+button.pill.pick:focus-visible { outline: 1px dotted var(--sel-ink); outline-offset: -3px; }
+.meta .tagged { display: inline-flex; align-items: stretch; margin: 1px 3px 1px 0; }
+.meta .tagged .chip { margin: 0; }
+.untag { border: 0; padding: 0 4px; cursor: pointer; background: var(--face); box-shadow: var(--thin-out); font: inherit; line-height: 1; color: var(--ink-dim); }
+.untag:hover, .untag:focus-visible { color: #c00000; }
+.chip.add { color: var(--ink-dim); }
+.tag-add .tag-field { width: 110px; height: 18px; padding: 0 3px; }
+dd.editable { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+dd.editable .edit { opacity: .55; padding: 0 2px; min-width: 0; height: 18px; }
+dd.editable:hover .edit, dd.editable .edit:focus-visible { opacity: 1; }
+dd.editable .field { min-width: 0; max-width: 220px; }
+.btn.small { min-width: 0; padding: 0 8px; height: 20px; }
+.tray-btn { border: 0; background: none; padding: 0; display: inline-flex; align-items: center; gap: 2px; cursor: pointer; font: inherit; color: inherit; }
+.tray-btn[hidden] { display: none; }
+.tray-btn:focus-visible { outline: 1px dotted currentColor; }

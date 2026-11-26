@@ -21,7 +21,8 @@ def test_schema_comes_from_szsdlc_config(project):
     assert wi["workflow"]["initial"] == "idea"
     assert states["done"]["terminal"] and not states["ready"]["terminal"]
     assert states["dropped"]["abandoned"]
-    assert states["planned"]["requires_artifact"] == ["design.md"]
+    assert states["designed"]["requires_artifact"] == ["design.md"]
+    assert states["planned"]["requires_artifact"] == ["plan.md"]
     assert states["ready"]["count"] == 1
     assert wi["progress_artifact"] == "plan.md"
     rel = {r["name"]: r for r in s["relations"]}
@@ -124,12 +125,13 @@ def test_refresh_reloads_and_keeps_the_last_good_model_on_failure(project):
 def test_info_and_snapshot_hide_local_paths(project, asset_root):
     p = Project(project, asset_root)
     info = p.info()
-    assert info["backend"]["kind"] == "workdir" and info["readonly"]
+    assert info["backend"]["kind"] == "workdir" and "readonly" not in info  # the service says whether editing is on
     assert info["unparseable"] == [] and info["duplicates"] == []
     snap = p.snapshot()
     assert snap["project"]["sdlc_root"] == "proj" and snap["project"]["asset_root"] == "assets"
     assert "assets:docs/guide.md" in snap["docs"]
     assert set(snap["details"]) == {r["id"] for r in snap["entities"]}
+    assert snap["project"]["readonly"] is True  # a snapshot cannot be edited
 
 
 def test_not_a_project():

@@ -7,7 +7,7 @@ Handlers render responses themselves, so the bytes stay exactly the viewer's.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, RootModel, StrictBool
+from pydantic import BaseModel, ConfigDict, RootModel, StrictBool, StrictFloat, StrictInt, StrictStr
 
 
 class ProjectSummary(BaseModel):
@@ -57,3 +57,79 @@ class RefreshResponse(BaseModel):
     replaced: bool
     note: str | None = None
     project: ProjectSummary
+
+
+# -- edits ------------------------------------------------------------------
+# Every edit names the content hash the page was drawn from (`expect`): szsdlc
+# refuses the write if the item changed since.
+
+class SetRequest(BaseModel):
+    """Fields and the status, through `szsdlc set`."""
+    model_config = ConfigDict(extra="forbid")
+    expect: str
+    #: field → value, applied in order. A bool or number is sent as szsdlc reads it.
+    values: dict[str, StrictStr | StrictBool | StrictInt | StrictFloat]
+    #: Override the workflow for a status; needs `reason`.
+    force: StrictBool = False
+    reason: str | None = None
+
+
+class TagRequest(BaseModel):
+    """Tags to add (`tag`) or remove (`untag`)."""
+    model_config = ConfigDict(extra="forbid")
+    expect: str
+    tags: list[StrictStr]
+
+
+class Edit(BaseModel):
+    """One change this viewer made since the last send."""
+    at: str
+    ref: str
+    op: str
+    summary: str
+
+
+class ChangesResponse(BaseModel):
+    """Whether the project has unsent changes, and the ones this viewer made."""
+    unsent: bool
+    edits: list[Edit]
+    #: Unsent changes this viewer did not make (the CLI, an agent, an earlier run).
+    outside: bool
+
+
+class FindingCounts(BaseModel):
+    errors: int
+    warnings: int
+
+
+class EditResponse(BaseModel):
+    """The post-state of an edit."""
+    #: szsdlc's own result for the operation.
+    result: dict
+    #: The item as it is now, with its new `hash`.
+    entity: dict
+    changes: ChangesResponse
+    findings: FindingCounts | None = None
+
+
+class SendResponse(BaseModel):
+    #: The views redrawn before sending.
+    changed: list[str]
+    #: Others' changes arrived: reload.
+    arrived: bool
+    #: Local changes were sent.
+    sent: bool
+    changes: ChangesResponse
+
+
+class Finding(BaseModel):
+    level: str
+    kind: str
+    ref: str
+    message: str
+    fix: str | None = None
+
+
+class FindingsResponse(FindingCounts):
+    total: int
+    rows: list[Finding]

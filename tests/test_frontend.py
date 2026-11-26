@@ -13,6 +13,7 @@ import pytest
 
 from szsdlc_ui_win95.registry import Registry
 from szsdlc_ui_win95.server import STATIC, make_server
+from test_locations import remote  # noqa: F401  (a fixture: a bare repository holding the project)
 
 APP = (STATIC / "app.js").read_text(encoding="utf-8")
 DEFAULT_TYPES = ("idea", "epic", "requirement", "spike", "work_item", "decision", "IDEA", "EPIC", "REQ", "SPK", "WI", "ADR")
@@ -87,6 +88,27 @@ def test_smoke_in_a_real_browser(project, asset_root):
         server.server_close()
 
 
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_editing_in_a_real_browser(remote):  # noqa: F811
+    """Status, a gate, tags, a field, Send changes and a stale write, against a project kept in git (WI-0061)."""
+    if not _playwright_available():
+        if os.environ.get("SZUI_REQUIRE_BROWSER"):
+            pytest.fail("SZUI_REQUIRE_BROWSER is set but node cannot require('playwright')")
+        pytest.skip("node playwright is not installed")
+    registry = Registry()
+    registry.add(remote.as_uri())
+    server = make_server(registry, "127.0.0.1", 0)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        script = Path(__file__).with_name("smoke_edit.js")
+        result = subprocess.run(["node", str(script), f"http://localhost:{server.server_port}/"],
+                                capture_output=True, text=True, timeout=180)
+        assert result.returncode == 0, result.stdout + result.stderr
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
 SNAPSHOT_CHECK = r"""
 const { chromium } = require('playwright');
 (async () => {
@@ -98,16 +120,21 @@ const { chromium } = require('playwright');
   await page.goto(process.argv[2]);
   await page.waitForSelector('.window.active .toolbar');
   const buttons = await page.$$('.toolbar button[title="Refresh (F5)"]');
+  await page.evaluate(() => { location.hash = '#proj--WI-0001'; });
+  await page.waitForSelector('.window.active .item-page h2');
+  const controls = await page.$$('.item-page .pill.pick, .item-page .untag, .item-page .chip.add, .item-page dd.editable .edit');
+  const tray = await page.isVisible('#tray-unsent');
   await browser.close();
   if (errors.length) { console.error(errors.join(' | ')); process.exit(1); }
   if (buttons.length) { console.error('a snapshot shows a Refresh button'); process.exit(1); }
+  if (controls.length || tray) { console.error('a snapshot shows editing controls'); process.exit(1); }
   console.log('snapshot ok');
 })().catch((e) => { console.error(e.message); process.exit(1); });
 """
 
 
-def test_a_snapshot_has_no_refresh_button(project, asset_root, tmp_path):
-    """A snapshot has nothing to refresh from (WI-0055)."""
+def test_a_snapshot_has_no_refresh_button_and_no_controls(project, asset_root, tmp_path):
+    """A snapshot has nothing to refresh from (WI-0055), and nothing to edit (WI-0061)."""
     if not _playwright_available():
         if os.environ.get("SZUI_REQUIRE_BROWSER"):
             pytest.fail("SZUI_REQUIRE_BROWSER is set but node cannot require('playwright')")

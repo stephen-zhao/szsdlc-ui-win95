@@ -20,8 +20,9 @@ pip install zhaostephen-szsdlc-ui-win95     # or: uv tool install zhaostephen-sz
 cd my-project && szsdlc-ui-win95 --open      # this project, and every project sdlc store szsdlc has recorded
 ```
 
-It serves `http://localhost:8095/`, on loopback only, and never writes to a
-project.
+It serves `http://localhost:8095/`, on loopback only. It changes a project only
+when you edit it, and only through szsdlc's own operations (`--read-only` turns
+editing off).
 
 **What opens by default:** every project sdlc store szsdlc has recorded (git
 clones and `dir` directories), plus the project you are standing in, if any.
@@ -41,6 +42,7 @@ szsdlc-ui-win95 --no-registered                       # only the current project
 szsdlc-ui-win95 --projects-file ~/.config/szsdlc/viewer.yml   # remembered projects
 szsdlc-ui-win95 ~/code/app --export app.html          # one self-contained HTML snapshot
 szsdlc-ui-win95 --port 0                              # any free port
+szsdlc-ui-win95 --read-only                           # look, never edit
 ```
 
 A project can be opened from **any location, whatever backend keeps it**: on
@@ -63,6 +65,31 @@ Opening a project it already has brings a clone up to date, but only when that
 clone has nothing unsent; otherwise the clone is shown as it is. Viewing never
 writes to a project.
 
+**Editing** is always on, where the data is shown, on an item's page:
+
+- **Status:** the status button lists the moves the workflow allows from
+  here, each with its gate ("needs plan.md"). Other… picks any declared
+  status, and asks for a reason, because the move skips the workflow.
+- **Tags:** × removes a tag, and + Tag adds one, suggesting the project's
+  tags.
+- **Fields:** the pencil beside a declared field opens an editor of its kind:
+  a date, a number, a choice, yes/no or text. A list or nested value is
+  edited by hand.
+
+Every edit is one of szsdlc's own operations, so a gate refuses exactly as the
+CLI would, with its remedy, and nothing is written. Each edit names the version
+of the item it was made on. If the item changed since (an agent, the CLI, a
+refresh), the viewer says **This item changed on disk. Reload?** and overwrites
+nothing. After each edit the tray shows `szsdlc validate`'s count, and the
+**Findings** window lists each finding with its fix.
+
+Edits are written to the copy on this computer at once. For a project kept in
+git they are **unsent changes**: a tray icon and a `*` in the title show them,
+and clicking the icon lists them. **File → Send changes** (or the tray's menu)
+runs `szsdlc sync` once, so all of them become one record. A failed send keeps
+them, and leaving the page with changes unsent asks first. A project kept in a
+folder here has nothing to send: the folder is the project.
+
 **Refresh** (View → Refresh, F5, or the taskbar's project menu) takes the sdlc
 backend's latest, through szsdlc's own `refresh`. It sends nothing
 and merges nothing, and every open window redraws in place. A project kept in a
@@ -81,6 +108,9 @@ project is kept.
 
 ## What it does
 
+- **Editing through szsdlc:** status, tags and fields on an item's page, with
+  gates, forced moves and stale writes refused as the CLI refuses them; unsent
+  changes are listed in the tray and sent with File → Send changes.
 - **One viewer, many projects.** A project button on the taskbar switches
   between them. Each project keeps its own windows, and File → Open project…
   adds one at runtime (`--no-open` turns that off).
@@ -116,6 +146,13 @@ or `/api/openapi.json` on a running viewer for the API described. The centrepiec
 `/api/p/<project>/schema`, the **schema descriptor**: each type's flags, fields,
 workflow (states with `terminal`, `abandoned` and gates), artifacts, derived
 attributes and relations, as szsdlc resolved them.
+
+Edits are `POST /api/p/<project>/entities/<ref>/set`, `…/tag` and `…/untag`, each
+with the item's `hash` as `expect`, and `POST /api/p/<project>/send`. They need
+the launch token in the page, like every write. A refusal is
+`application/problem+json` with szsdlc's own refusal as data under `refusal`:
+409 for a stale write, 422 for a gate, 400 for bad input, 404 for an unknown
+item.
 
 ## Develop
 

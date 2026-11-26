@@ -18,7 +18,7 @@ from fastapi import Request
 from pydantic import BaseModel, ValidationError
 
 from .map_responses import Refused, problem
-from .wire_model import OpenProjectRequest, RefreshRequest
+from .wire_model import OpenProjectRequest, RefreshRequest, SetRequest, TagRequest
 
 MAX_BODY = 65536
 
@@ -78,3 +78,21 @@ def open_project_args(body: dict) -> tuple[str, str | None]:
 def refresh_args(body: dict) -> bool:
     """A Refresh body as `replace`."""
     return validated(RefreshRequest, body).replace
+
+
+def _as_szsdlc_value(value: Any) -> str:
+    """A JSON value as `szsdlc set` reads it: `true`/`false` for a bool."""
+    return ("true" if value else "false") if isinstance(value, bool) else str(value)
+
+
+def set_args(body: dict) -> dict:
+    """A Set body as the service's keyword arguments."""
+    asked = validated(SetRequest, body)
+    return {"values": {k: _as_szsdlc_value(v) for k, v in asked.values.items()}, "expect": asked.expect,
+            "force": asked.force, "reason": asked.reason}
+
+
+def tag_args(body: dict) -> dict:
+    """A Tag or Untag body as the service's keyword arguments."""
+    asked = validated(TagRequest, body)
+    return {"tags": list(asked.tags), "expect": asked.expect}

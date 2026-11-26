@@ -23,7 +23,8 @@ def parse_project(arg: str) -> tuple[str, Path | None]:
 
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(prog="szsdlc-ui-win95",
-                                 description="A Windows 95-styled viewer for szsdlc projects. Read-only.")
+                                 description="A Windows 95-styled viewer for szsdlc projects. "
+                                             "Edits go through szsdlc's own operations; --read-only turns them off.")
     ap.add_argument("projects", nargs="*", metavar="LOCATION[::ASSET_ROOT]",
                     help="projects to serve: a folder inside one, or a repository URL holding one "
                          "(default: the current directory); ::ASSET_ROOT names the project asset root")
@@ -34,6 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--projects-file", metavar="FILE",
                     help="YAML list of {location, asset_root}: read at start, rewritten when a project is opened")
     ap.add_argument("--no-open", action="store_true", help="refuse File > Open project from the browser")
+    ap.add_argument("--read-only", action="store_true",
+                    help="refuse every edit; the viewer then never changes a record")
     ap.add_argument("--host", default="127.0.0.1", help="interface to bind (default: loopback only)")
     ap.add_argument("--port", type=int, default=8095, help="port (0 picks a free one; default 8095)")
     ap.add_argument("--open", action="store_true", help="open a browser once serving")
@@ -85,7 +88,8 @@ def main(argv=None) -> int:
         return 0
 
     try:
-        server = make_server(registry, args.host, args.port, allow_open=not args.no_open, verbose=args.verbose)
+        server = make_server(registry, args.host, args.port, allow_open=not args.no_open,
+                             read_only=args.read_only, verbose=args.verbose)
     except OSError as err:
         print(f"szsdlc-ui-win95: cannot listen on {args.host}:{args.port}: {err.strerror or err}. "
               "Try --port 0 for any free port.", file=sys.stderr)
@@ -97,7 +101,7 @@ def main(argv=None) -> int:
         print(f"  {pid:<24} {p.sdlc_root}  ({len(p.store_model)} entities; asset root: {p.asset_root or 'none'})")
         if p.update_warning:
             print(f"  {'':<24} note: {p.update_warning}")
-    print(f"  serving {url}  (read-only; Ctrl-C to stop)")
+    print(f"  serving {url}  ({'read-only' if args.read_only else 'editing through szsdlc'}; Ctrl-C to stop)")
     if args.open:
         webbrowser.open(url)
     try:

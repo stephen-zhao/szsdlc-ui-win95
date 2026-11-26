@@ -12,11 +12,12 @@ from typing import Any
 
 from starlette.responses import Response
 
-from ..services import Conflict, Forbidden, Invalid, NotFound, ServiceError
+from ..services import Conflict, Forbidden, Invalid, NotFound, Rejected, ServiceError, Stale
 
 #: How each service refusal is answered over HTTP.
 STATUS = {NotFound: HTTPStatus.NOT_FOUND, Forbidden: HTTPStatus.FORBIDDEN,
-          Invalid: HTTPStatus.BAD_REQUEST, Conflict: HTTPStatus.CONFLICT}
+          Invalid: HTTPStatus.BAD_REQUEST, Conflict: HTTPStatus.CONFLICT, Stale: HTTPStatus.CONFLICT,
+          Rejected: HTTPStatus.UNPROCESSABLE_ENTITY}
 
 
 def send(status: int, body: bytes, ctype: str, extra: dict | None = None) -> Response:
@@ -29,14 +30,16 @@ def send_json(obj: Any, status: int = HTTPStatus.OK) -> Response:
                 {"Cache-Control": "no-store"})
 
 
-def problem(status: int, title: str, detail: str, fix: str | None = None) -> Response:
-    body = {"type": "about:blank", "title": title, "status": int(status), "detail": detail, **({"fix": fix} if fix else {})}
+def problem(status: int, title: str, detail: str, fix: str | None = None, refusal: dict | None = None) -> Response:
+    """application/problem+json. `refusal` is szsdlc's refusal as data, passed on when szsdlc refused."""
+    body = {"type": "about:blank", "title": title, "status": int(status), "detail": detail,
+            **({"fix": fix} if fix else {}), **({"refusal": refusal} if refusal else {})}
     return send(status, json.dumps(body).encode(), "application/problem+json", {"Cache-Control": "no-store"})
 
 
 def refusal(err: ServiceError) -> Response:
     status = next((s for cls, s in STATUS.items() if isinstance(err, cls)), HTTPStatus.BAD_REQUEST)
-    return problem(status, err.title, err.detail, err.fix)
+    return problem(status, err.title, err.detail, err.fix, err.refusal)
 
 
 class Refused(Exception):

@@ -28,16 +28,21 @@ and capture rather than discuss and forget.
    derived attributes and backend resolution come from the library. If the
    viewer needs a fact szsdlc does not expose, the fix belongs in szsdlc, not in a
    second parser here.
-3. **Read-only; a project sdlc store dir is created only when a person opens a project.**
-   Opening takes any location (a folder here, or a repository URL holding the
-   project) and goes through `locations.py`, which drives szsdlc's own
-   backends: `resolve`/`from_settings`, then `ensure`, which may clone.
-   Nothing else may create one, and viewing never writes to a project. A clone
-   is updated on open only when it has no unsent changes, and Refresh
-   replaces unsent state only after the person confirms, and only through
-   szsdlc's own `refresh`. Phase 2 writes must
-   go through szsdlc's own operations, never a file write, so every gate still
-   applies.
+3. **Edits go through szsdlc's operations only; a project sdlc store dir is created only when a person opens a project.**
+   - **Writes:** every edit is one operation of szsdlc's operation layer
+     (`szsdlc.ops`), called in-process from `edits.py`, never a file write, so
+     every gate and refusal is the CLI's. Each entity write passes the content
+     hash the page was drawn from as `expect`, so a change made since is
+     refused rather than overwritten. Edits stay local until File → Send
+     changes runs `sync` once. `--read-only` refuses every edit.
+   - **Opening:** any location (a folder here, or a repository URL holding the
+     project) goes through `locations.py`, which drives szsdlc's own backends:
+     `resolve`/`from_settings`, then `ensure`, which may clone. Nothing else
+     may create a project sdlc store dir, and viewing never writes to a
+     project.
+   - **Updating:** a clone is updated on open only when it has no unsent
+     changes. Refresh replaces unsent state only after the person confirms,
+     and only through szsdlc's own `refresh`.
 7. **Speak szsdlc's glossary.** The words are szsdlc's (its docs/reference.md,
    "Backends → Glossary"): the **project sdlc root** (`.szsdlc/` and the
    records; document root id `sdlc`), a **project asset root** (the code and
@@ -59,7 +64,7 @@ These apply to new code now, and existing code moves to them gradually.
 
 **Layers.** The first split is by layer, the second by domain.
 - **Onion order, inside out:**
-  1. **The core:** the model and services, with no IO-framework dependencies. Today the model is `errors`, `documents`, `locations`, `project` and `registry` (they read projects through szsdlc), and the services are `services/`: what the viewer does, as plain Python.
+  1. **The core:** the model and services, with no IO-framework dependencies. Today the model is `errors`, `documents`, `locations`, `project`, `edits` and `registry` (they read and write projects through szsdlc), and the services are `services/`: what the viewer does, as plain Python.
   2. **The interfaces:** IO-touching code and interface types: `web/` (FastAPI, and its request and response types) and `export.py`.
   3. **The composition root,** which wires the layers together: `server.py` (with `cli.py` as the command on top).
 - **A strict DAG between layers:** a layer imports only layers inside it.
@@ -84,6 +89,7 @@ These apply to new code now, and existing code moves to them gradually.
 | `src/szsdlc_ui_win95/locations.py` | Any location to a materialized backend, through szsdlc |
 | `src/szsdlc_ui_win95/documents.py` | Document references, root containment, reading |
 | `src/szsdlc_ui_win95/registry.py` | The projects one viewer serves |
+| `src/szsdlc_ui_win95/edits.py` | One project's writes through `szsdlc.ops`: one writer at a time, the `expect` precondition, the edit log, unsent changes and findings |
 | `src/szsdlc_ui_win95/services/` | The viewer's operations, framework-free: `ViewerService` and its typed refusals |
 | `src/szsdlc_ui_win95/web/` | HTTP: the FastAPI routes (`app.py`), the wire model (`wire_model.py`), the mappers between HTTP and the service (`map_requests.py` in: the write guard, validation, service arguments; `map_responses.py` out: JSON and problems), the hardening middleware (`asgi.py`) and the uvicorn server (`server.py`) |
 | `src/szsdlc_ui_win95/server.py` | The composition root: the service, the web app and the server, wired together |

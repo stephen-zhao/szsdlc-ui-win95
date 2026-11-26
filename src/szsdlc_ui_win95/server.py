@@ -16,6 +16,11 @@ Routes (every project route is scoped by project id):
     GET  /api/p/<id>/docs                generated views and loose documents
     GET  /api/p/<id>/doc?root=&path=     one document (front matter split, raw kept)
     GET  /api/p/<id>/raw?root=&path=     bytes, for images; never active content
+    GET  /api/p/<id>/changes             unsent changes, and the edits this viewer made
+    GET  /api/p/<id>/findings            szsdlc validate, as data
+    POST /api/p/<id>/entities/<ref>/set  {expect, values, force?, reason?}  szsdlc set
+    POST /api/p/<id>/entities/<ref>/tag  {expect, tags}  szsdlc tag (and /untag)
+    POST /api/p/<id>/send                szsdlc sync, once: send unsent changes
     GET  /api/openapi.json               the API, described
 
 Layers, inside out (AGENTS.md, "Layers"): the core (`registry`, `project`,
@@ -23,9 +28,14 @@ Layers, inside out (AGENTS.md, "Layers"): the core (`registry`, `project`,
 then `web` (FastAPI on uvicorn). This module is the only one that knows all three.
 
 Hardening: loopback by default; any Host header the server was not started on is
-refused (DNS rebinding); the two writes (opening a project, refreshing one) need a
-per-launch token embedded in the page, plus a same-origin Origin; paths are
-contained to their root; CSP allows only the server's own scripts.
+refused (DNS rebinding); every POST needs a per-launch token embedded in the page,
+plus a same-origin Origin; paths are contained to their root; CSP allows only the
+server's own scripts.
+
+Writes: an edit is one szsdlc operation, called in-process (`edits.py`), never a
+file write, and passes the content hash the page was drawn from, so a change made
+since is refused (409) rather than overwritten. `--read-only` refuses every edit
+(403); opening and refreshing never change a record, so they stay.
 """
 
 from __future__ import annotations
@@ -47,9 +57,9 @@ def meta() -> dict:
 
 
 def make_server(registry: Registry, host: str = "127.0.0.1", port: int = 8095, *,
-                allow_open: bool = True, verbose: bool = False) -> Server:
+                allow_open: bool = True, read_only: bool = False, verbose: bool = False) -> Server:
     """A configured server, not yet serving. Port 0 picks a free port."""
     token = secrets.token_urlsafe(24)
-    service = ViewerService(registry, allow_open=allow_open)
+    service = ViewerService(registry, allow_open=allow_open, read_only=read_only)
     app = create_app(service, allowed_hosts=frozenset({"127.0.0.1", "localhost", "::1", host}), token=token)
     return Server(app, host, port, token=token, verbose=verbose or bool(os.environ.get("SZUI_LOG")))

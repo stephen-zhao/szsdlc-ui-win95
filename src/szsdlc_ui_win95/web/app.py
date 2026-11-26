@@ -12,10 +12,11 @@ from fastapi import Depends, FastAPI, Request
 from .. import __version__
 from ..services import ServiceError, ViewerService
 from .asgi import Harden
-from .map_requests import body_schema, open_project_args, query, refresh_args, write_guard
+from .map_requests import body_schema, open_project_args, query, refresh_args, set_args, tag_args, write_guard
 from .map_responses import Refused, problem, refusal, send, send_json
-from .wire_model import (ListProjectsResponse, MetaResponse, OpenProjectRequest, OpenProjectResponse,
-                         RefreshRequest, RefreshResponse)
+from .wire_model import (ChangesResponse, EditResponse, FindingsResponse, ListProjectsResponse, MetaResponse,
+                         OpenProjectRequest, OpenProjectResponse, RefreshRequest, RefreshResponse, SendResponse,
+                         SetRequest, TagRequest)
 
 STATIC = Path(str(resources.files("szsdlc_ui_win95") / "static")).resolve()
 CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
@@ -57,6 +58,14 @@ def create_app(service: ViewerService, *, allowed_hosts: frozenset[str], token: 
     @read("/api/projects", response_model=ListProjectsResponse)
     def list_projects():
         return send_json(service.projects())
+
+    @read("/api/p/{pid}/changes", response_model=ChangesResponse)
+    def changes(pid: str):
+        return send_json(service.changes(pid))
+
+    @read("/api/p/{pid}/findings", response_model=FindingsResponse)
+    def findings(pid: str):
+        return send_json(service.findings(pid))
 
     @read("/api/p/{pid}/{route:path}")
     def project_route(pid: str, route: str, request: Request):
@@ -100,6 +109,31 @@ def create_app(service: ViewerService, *, allowed_hosts: frozenset[str], token: 
     def refresh(pid: str, body: dict = Depends(write_body)):
         service.known(pid)  # an unknown project is named before a bad body
         return send_json(service.refresh(pid, replace=refresh_args(body)))
+
+    # Edits: each through one szsdlc operation, never a file write. --read-only
+    # is refused first, then an unknown project, then a bad body.
+    @app.post("/api/p/{pid}/entities/{ref}/set", response_model=EditResponse, openapi_extra=body_schema(SetRequest))
+    def set_fields(pid: str, ref: str, body: dict = Depends(write_body)):
+        service.ensure_can_edit()
+        service.known(pid)
+        return send_json(service.set(pid, ref, **set_args(body)))
+
+    @app.post("/api/p/{pid}/entities/{ref}/tag", response_model=EditResponse, openapi_extra=body_schema(TagRequest))
+    def tag(pid: str, ref: str, body: dict = Depends(write_body)):
+        service.ensure_can_edit()
+        service.known(pid)
+        return send_json(service.tag(pid, ref, add=True, **tag_args(body)))
+
+    @app.post("/api/p/{pid}/entities/{ref}/untag", response_model=EditResponse, openapi_extra=body_schema(TagRequest))
+    def untag(pid: str, ref: str, body: dict = Depends(write_body)):
+        service.ensure_can_edit()
+        service.known(pid)
+        return send_json(service.tag(pid, ref, add=False, **tag_args(body)))
+
+    @app.post("/api/p/{pid}/send", response_model=SendResponse)
+    def send_changes(pid: str, body: dict = Depends(write_body)):
+        service.ensure_can_edit()
+        return send_json(service.send(pid))
 
     @app.post("/{path:path}", include_in_schema=False)
     def post_unknown(request: Request, body: dict = Depends(write_body)):
