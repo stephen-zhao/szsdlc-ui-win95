@@ -69,7 +69,7 @@ skip_covered = true
 # workflow runs `make bump-version PART=…`, which commits and tags vX.Y.Z; the
 # Publish workflow reads current_version below to check a tag against its tree.
 [tool.bumpversion]
-current_version = "0.1.10"
+current_version = "0.1.11"
 parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)\\.(?P<patch>\\d+)"
 serialize = ["{major}.{minor}.{patch}"]
 search = "{current_version}"
