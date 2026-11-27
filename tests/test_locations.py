@@ -123,6 +123,8 @@ def test_refusals_name_the_problem(tmp_path, isolated_szsdlc):
         Project(tmp_path / "nowhere")
     with pytest.raises(ProjectError, match="not a folder on this computer"):
         Project("ext::sh -c touch% /tmp/x")  # a git remote helper is never treated as a remote
+    with pytest.raises(ProjectError, match="remote helper"):  # and szsdlc's reason is shown with it
+        Project("ext::sh -c touch% /tmp/x")
     with pytest.raises(ProjectError, match="could not clone"):
         Project((tmp_path / "missing.git").as_uri())
     plain = tmp_path / "plain"
@@ -156,7 +158,8 @@ def test_location_helpers(tmp_path):
     assert locations.is_remote("ssh://git@host/org/repo.git#main")
     assert not locations.is_remote(str(tmp_path)) and not locations.is_remote("C:\\code\\app")
     assert not locations.is_remote("ext::sh -c x") and not locations.is_remote("relative/folder")
-    assert locations.display("https://user:token@host/org/repo.git?x=1") == "https://***@host/org/repo.git"
+    # szsdlc's own redaction (WI-0072): credentials and the query are masked.
+    assert locations.display("https://user:token@host/org/repo.git?x=1") == "https://***@host/org/repo.git?***"
     assert locations.store_name(Path("/x/szsdlc-szsdlc-0123456789")) == "szsdlc-szsdlc"
     assert locations.store_name(Path("/x/plain")) == "plain"
 
@@ -239,3 +242,23 @@ def test_refresh_over_http_asks_then_replaces(remote, tmp_path):
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_locations_interprets_nothing_itself():
+    """Rule 6 (WI-0072): szsdlc's backends interpret locations; this module names none of them."""
+    import ast
+    import inspect
+
+    from szsdlc import backend as sz_backend
+
+    assert locations.is_remote("https://host/org/repo.git")  # szsdlc loads its backends to answer
+    types = {name.lower() for name in sz_backend.BACKENDS}
+    assert types  # the check below is not vacuous
+    source = inspect.getsource(locations)
+    tree = ast.parse(source)
+    literals = {node.value.strip().lower() for node in ast.walk(tree)
+                if isinstance(node, ast.Constant) and isinstance(node.value, str)}
+    assert not literals & types, literals & types
+    imported = {alias.name for node in ast.walk(tree) if isinstance(node, (ast.Import, ast.ImportFrom))
+                for alias in node.names}
+    assert "re" not in imported and "Setting" not in imported  # no regex, no hand-built settings
