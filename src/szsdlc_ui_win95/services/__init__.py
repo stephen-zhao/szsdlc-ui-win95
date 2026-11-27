@@ -6,7 +6,7 @@ or anything in `szsdlc_ui_win95.web`; a test holds that line (see AGENTS.md,
 injection.
 """
 
-from .errors import Conflict, Forbidden, Invalid, NotFound, ServiceError
+from .errors import Conflict, Forbidden, Invalid, NotFound, Rejected, ServiceError, Stale
 from .viewer import Raw, ViewerService
 
-__all__ = ["ServiceError", "NotFound", "Forbidden", "Invalid", "Conflict", "Raw", "ViewerService"]
+__all__ = ["ServiceError", "NotFound", "Forbidden", "Invalid", "Conflict", "Stale", "Rejected", "Raw", "ViewerService"]

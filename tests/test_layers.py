@@ -1,6 +1,6 @@
 """The layers' import rules (AGENTS.md, "Layers"), checked on the source.
 
-Inside out: the core (`errors`, `documents`, `locations`, `project`,
+Inside out: the core (`errors`, `documents`, `locations`, `project`, `edits`,
 `registry`), then `services`, then `web`, then the composition root and the
 interfaces (`server`, `cli`, `export`). A layer imports only layers inside it,
 and only `web` may import a web framework.
@@ -16,7 +16,7 @@ import pytest
 import szsdlc_ui_win95
 
 PACKAGE = Path(szsdlc_ui_win95.__file__).parent
-CORE = {"errors", "documents", "locations", "project", "registry"}
+CORE = {"errors", "documents", "locations", "project", "edits", "registry"}
 FRAMEWORKS = {"fastapi", "starlette", "uvicorn", "pydantic"}
 OUTER = {"server", "cli", "export", "__main__"}
 

@@ -20,6 +20,9 @@ def isolated_szsdlc(tmp_path_factory, monkeypatch):
     home = tmp_path_factory.mktemp("claude-config")
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(home))
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    # Inside a Claude Code turn szsdlc commits but leaves sending to the turn end;
+    # outside one it sends after every command. Tests run as CI does: outside.
+    monkeypatch.delenv("CLAUDECODE", raising=False)
     for key in list(os.environ):
         if key.startswith("SZSDLC_"):
             monkeypatch.delenv(key)

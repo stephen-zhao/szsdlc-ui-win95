@@ -18,7 +18,7 @@ dynamic = ["version"]
 dependencies = [
     "fastapi>=0.165.0",
     "uvicorn>=0.54.0",
-    "zhaostephen-szsdlc>=0.2.11",
+    "zhaostephen-szsdlc>=0.2.18",
 ]
 
 [project.optional-dependencies]

@@ -58,6 +58,19 @@
     if (!r.ok && r.status !== 404) throw new Error(`${path}: HTTP ${r.status}`);
     return r.json();
   }
+  // Every POST carries this launch's token. A refusal is thrown with its
+  // problem: status, title, fix (text) and, when szsdlc refused, the refusal as data.
+  async function post(path, body) {
+    const r = await fetch('/api/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Viewer-Token': TOKEN },
+      body: JSON.stringify(body || {}) });
+    const out = await r.json();
+    if (!r.ok) {
+      throw Object.assign(new Error(out.detail || out.title || `HTTP ${r.status}`),
+        { status: r.status, title: out.title, fix: out.fix, refusal: out.refusal || null });
+    }
+    return out;
+  }
+  const P = (pid) => 'p/' + encodeURIComponent(pid) + '/';
   const hub = SNAP ? {
     meta: async () => SNAP.meta || {},
     projects: async () => SNAP.projects,
@@ -66,22 +79,14 @@
   } : {
     meta: () => get('meta'),
     projects: () => get('projects'),
-    async open(location, assetRoot) {
-      const r = await fetch('/api/projects', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Viewer-Token': TOKEN },
-        body: JSON.stringify({ location, asset_root: assetRoot || null }) });
-      const body = await r.json();
-      if (!r.ok) { const e = new Error(body.detail || body.title || `HTTP ${r.status}`); e.fix = body.fix; throw e; }
-      return body;
-    },
+    open: (location, assetRoot) => post('projects', { location, asset_root: assetRoot || null }),
     // Take the sdlc backend's latest. Nothing is sent. A 409
     // means unsent changes would be replaced; the caller asks, then sets replace.
-    async refresh(pid, replace = false) {
-      const r = await fetch('/api/p/' + encodeURIComponent(pid) + '/refresh', { method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Viewer-Token': TOKEN }, body: JSON.stringify({ replace }) });
-      const body = await r.json();
-      if (!r.ok) { const e = new Error(body.detail || body.title || `HTTP ${r.status}`); e.status = r.status; e.fix = body.fix; throw e; }
-      return body;
-    },
+    refresh: (pid, replace = false) => post(P(pid) + 'refresh', { replace }),
+    // One szsdlc operation on one item: set, tag or untag. `body` carries `expect`.
+    edit: (pid, ref, op, body) => post(P(pid) + 'entities/' + encodeURIComponent(ref) + '/' + op, body),
+    // szsdlc sync, once: everything unsent, as one record.
+    send: (pid) => post(P(pid) + 'send', {}),
   };
   function apiFor(pid) {
     if (SNAP) {
@@ -92,6 +97,7 @@
         entity: async (id) => D.details[id] || null,
         doc: async (root, path) => D.docs[`${rootId(root)}:${path}`] || { root: rootId(root), path, exists: false, asset_root: false },
         raw: () => null,
+        changes: async () => NOTHING_UNSENT, findings: async () => null,
       };
     }
     const base = 'p/' + encodeURIComponent(pid) + '/';
@@ -101,6 +107,7 @@
       entity: (id) => get(base + 'entities/' + encodeURIComponent(id)),
       doc: (root, path, fallback) => get(base + 'doc', { root, path, fallback: fallback ? '1' : '0' }),
       raw: (root, path) => '/api/' + base + 'raw?' + new URLSearchParams({ root, path }),
+      changes: () => get(base + 'changes'), findings: () => get(base + 'findings'),
     };
   }
 
@@ -108,11 +115,16 @@
   // S is the *current* project's context; CTX holds every project loaded so far.
   let S = null;
   const CTX = new Map();
+  // Per project: whether it has unsent changes, and the edits this viewer made (GET changes).
+  const UNSENT = new Map();
   let PROJECTS = [];
   let META = {};
   const typeOf = (row) => S.types.get(row.type);
   const rowsOfType = (prefix) => S.rows.filter((r) => r.type === prefix);
   const schemaFromConfig = () => S.schema.source !== 'inferred';
+  // Editing is always on, except in a snapshot and in a viewer started --read-only.
+  const canEdit = () => !SNAP && !META.readonly;
+  const NOTHING_UNSENT = { unsent: false, edits: [], outside: false };
 
   // ------------------------------------------------------------------ icons
   // Original 16px pixel art. A type's glyph comes from its traits; its colour from its prefix.
@@ -151,6 +163,9 @@
     tag: () => '<path d="M1.5 2.5h6l7 7-5 5-7-7z" fill="#f2d65c" stroke="#7a5c00"/><circle cx="5" cy="6" r="1.3" fill="#7a5c00"/>',
     network: () => '<rect x="1" y="2" width="7" height="5" fill="#c0c0c0" stroke="#000" stroke-width=".8"/><rect x="2" y="3" width="5" height="3" fill="#008080"/><rect x="8" y="8" width="7" height="5" fill="#c0c0c0" stroke="#000" stroke-width=".8"/><rect x="9" y="9" width="5" height="3" fill="#000080"/><path d="M4.5 7v4.5H8M11.5 8V5.5H8" fill="none" stroke="#000"/><rect x="1" y="13" width="6" height="2" fill="#808080"/>',
     power: () => '<path d="M5 4.5a5 5 0 1 0 6 0" fill="none" stroke="#800000" stroke-width="2"/><rect x="7" y="1" width="2" height="7" fill="#800000"/>',
+    // An envelope with an arrow leaving it: changes waiting to be sent.
+    unsent: () => '<rect x="1.5" y="4.5" width="10" height="8" fill="#fff" stroke="#000"/><path d="M1.5 4.5l5 4 5-4" fill="none" stroke="#000"/><path d="M10 1.5h4v4" fill="none" stroke="#008000" stroke-width="1.6"/><path d="M14 1.5l-5 5" stroke="#008000" stroke-width="1.6"/>',
+    pencil: () => '<path d="M2 14l1-4 8-8 3 3-8 8z" fill="#f2d65c" stroke="#000" stroke-width=".8"/><path d="M2 14l1-4 3 3z" fill="#e0c090" stroke="#000" stroke-width=".8"/><path d="M10 3l3 3" stroke="#000" stroke-width=".8"/>',
     logo: () => '<rect x="1.5" y="2.5" width="9" height="3" fill="#00a0a0" stroke="#000"/><rect x="3.5" y="6.5" width="10" height="3" fill="#2040c0" stroke="#000"/><rect x="5.5" y="10.5" width="9" height="3" fill="#c03020" stroke="#000"/>',
   };
   function icon(spec, size = 16) {
@@ -645,6 +660,178 @@
     return w;
   }
 
+  // ----------------------------------------------------------------- edits
+  // Every change is one szsdlc operation, called by the viewer's server; the
+  // page never writes anything itself. Each carries the hash the page was drawn
+  // from (`expect`), so a change made since is refused rather than overwritten.
+  // The server answers with the post-state; the project's lists are then read
+  // again and every window of it redraws in place, as after a Refresh.
+  function changeWords(op, out) {
+    if (op !== 'set') return `tags: ${(out.result.tags || []).map((t) => '#' + t).join(' ') || '(none)'}`;
+    return out.result.changes.map((c) => `${c.field} → ${c.after ?? '(not set)'}${c.forced ? ' (forced)' : ''}${c.notes?.length ? ` (${c.notes.join('; ')})` : ''}`).join(', ');
+  }
+  async function reloadProject(pid, message, prefetched) {
+    CTX.delete(pid);
+    const ctx = await loadProject(pid);
+    if (prefetched) ctx.prefetched.set(normId(prefetched.id), prefetched);
+    applyRefresh(pid, ctx, message);
+  }
+  async function edit(op, ref, body) {
+    const pid = S.pid;
+    let out;
+    try { out = await hub.edit(pid, ref, op, body); } catch (err) { refusalBox(err, pid, ref); return null; }
+    await reloadProject(pid, `${out.result.id}: ${changeWords(op, out)}`, out.entity);
+    return out;
+  }
+  function refusalBox(err, pid, ref) {
+    if (err.refusal?.class === 'stale_precondition') {
+      return messageBox({ kind: 'warn', title: 'Changed on disk', text: ['This item changed on disk. Reload?',
+        `${ref} was changed elsewhere since this page was drawn, so nothing was changed.`],
+      buttons: [{ label: 'Yes', default: true, action: () => reloadProject(pid, 'Reloaded') }, { label: 'No' }] });
+    }
+    return messageBox({ kind: err.status === 422 ? 'warn' : 'error', title: err.title || 'Cannot change that',
+      text: [String(err.message || err), err.fix ? `Fix: ${err.fix}` : null].filter(Boolean) });
+  }
+  async function sendChanges() {
+    const pid = S.pid;
+    let out;
+    try { out = await hub.send(pid); } catch (err) {
+      return messageBox({ kind: 'error', title: 'Send changes', text: [String(err.message || err), err.fix ? `Fix: ${err.fix}` : null,
+        'Your changes are kept here, to send next time.'].filter(Boolean) });
+    }
+    UNSENT.set(pid, out.changes);
+    if (out.arrived) return reloadProject(pid, 'Sent; changes arrived');
+    updateTray();
+    quietStatus(out.sent ? 'Sent' : 'Nothing to send');
+  }
+  const unsentHere = () => !!(S && UNSENT.get(S.pid)?.unsent);
+  function unsentMenu() {
+    const c = UNSENT.get(S.pid) || NOTHING_UNSENT;
+    return [{ head: c.unsent ? 'Unsent changes' : 'No unsent changes' },
+      ...c.edits.map((e) => ({ label: `${e.ref}: ${e.summary}`, title: e.at, action: () => openItem(e.ref) })),
+      c.outside ? { label: 'Changes made outside this viewer', disabled: true } : null,
+      '-', { label: 'Send changes', icon: 'unsent', action: sendChanges },
+      { label: 'Findings…', icon: 'warn', action: openFindings }];
+  }
+  // The workflow's own moves from here, each with its gate, then any other
+  // declared status, which is a forced move and asks for a reason.
+  function gateHint(s) {
+    return [s.requires_artifact?.length ? `needs ${s.requires_artifact.join(', ')}` : null,
+      s.requires_tasks_complete ? 'needs every task checked' : null].filter(Boolean).join('; ');
+  }
+  function statusControl(d, t) {
+    if (!d.status) return null;
+    if (!canEdit() || !t.workflow.statuses.length) return h('span', { class: 'pill' }, d.status);
+    const b = h('button', { class: 'pill pick', type: 'button', 'aria-haspopup': 'menu', 'aria-expanded': 'false', title: 'Change the status',
+      onclick: (e) => { e.stopPropagation(); if (openMenuEl?.anchor === b) closeMenus(); else popMenu(b, statusMenu(d, t)); } },
+    d.status, h('span', { class: 'caret', 'aria-hidden': 'true' }, '▾'));
+    return b;
+  }
+  function statusMenu(d, t) {
+    const states = new Map(t.workflow.statuses.map((s) => [s.name, s]));
+    const moves = (states.get(d.status)?.to || []).filter((n) => states.has(n) && n !== d.status);
+    return [{ head: moves.length ? 'Move to' : 'No moves from here' },
+      ...moves.map((n) => { const hint = gateHint(states.get(n)); return { label: hint ? `${n} (${hint})` : n, action: () => edit('set', d.id, { expect: d.hash, values: { status: n } }) }; }),
+      '-', { label: 'Other…', title: 'Any other status: overrides the workflow, and asks why', action: () => otherStatus(d, t) }];
+  }
+  function otherStatus(d, t) {
+    const w = openWindow({ title: `Change ${d.id}'s status`, dialog: true, width: 400 });
+    const pick = h('select', { class: 'field', id: uid() }, t.workflow.statuses.filter((s) => s.name !== d.status).map((s) => h('option', { value: s.name }, s.name)));
+    const why = h('textarea', { class: 'field', id: uid(), rows: '3', placeholder: 'Why this move skips the workflow' });
+    const ok = h('button', { class: 'btn default', type: 'button', disabled: true,
+      onclick: () => { w.close(); edit('set', d.id, { expect: d.hash, values: { status: pick.value }, force: true, reason: why.value.trim() }); } }, 'Move');
+    why.addEventListener('input', () => { ok.disabled = !why.value.trim(); });
+    w.body.append(h('div', { class: 'dialog-body' }, icon('warn', 32), h('div', { class: 'grow', style: { display: 'grid', gap: '6px' } },
+      h('p', null, `Moving to a status the workflow does not offer from ${d.status} is recorded as forced, with your reason. A gate still applies.`),
+      h('label', { class: 'row', for: pick.id }, h('span', { style: { width: '60px' } }, 'Status:'), pick),
+      h('label', { for: why.id }, 'Reason:'), why)),
+    h('div', { class: 'row end' }, ok, h('button', { class: 'btn', type: 'button', onclick: () => w.close() }, 'Cancel')));
+    pick.focus();
+  }
+  // Tags: × removes one; + Tag opens a field that suggests the project's tags.
+  function tagChips(d) {
+    const chip = (tg) => h('button', { class: 'chip', type: 'button', onclick: (e) => go('tag:' + tg, e.currentTarget) }, '#' + tg);
+    if (!canEdit()) return (d.tags || []).map(chip);
+    const add = h('button', { class: 'chip add', type: 'button', title: 'Add a tag', onclick: () => addTag(add, d) }, '+ Tag');
+    return [...(d.tags || []).map((tg) => h('span', { class: 'tagged' }, chip(tg),
+      h('button', { class: 'untag', type: 'button', title: `Remove #${tg}`, 'aria-label': `Remove tag ${tg}`,
+        onclick: () => edit('untag', d.id, { expect: d.hash, tags: [tg] }) }, '×'))), add];
+  }
+  function addTag(btn, d) {
+    const list = h('datalist', { id: uid() }, [...S.tags.keys()].filter((t) => !(d.tags || []).includes(t)).sort().map((t) => h('option', { value: t })));
+    const field = h('input', { class: 'field tag-field', type: 'text', list: list.id, placeholder: 'tag', 'aria-label': 'New tag', autocomplete: 'off', spellcheck: 'false' });
+    const wrap = h('span', { class: 'tag-add' }, field, list);
+    const restore = () => { if (wrap.isConnected) wrap.replaceWith(btn); };
+    field.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && field.value.trim()) { e.preventDefault(); const tg = field.value.trim().replace(/^#/, ''); restore(); edit('tag', d.id, { expect: d.hash, tags: [tg] }); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); restore(); btn.focus(); }
+    });
+    field.addEventListener('blur', () => setTimeout(restore, 150));
+    btn.replaceWith(wrap);
+    field.focus();
+  }
+  // Fields: every declared scalar field gets an editor of its kind. A list or
+  // nested value has none: szsdlc itself edits those by hand (C3).
+  const SCALAR = new Set(['date', 'string', 'text', 'number', 'bool', 'ref', 'url']);
+  const fieldEditable = (f, v) => canEdit() && (SCALAR.has(f.kind) || f.enum) && (v == null || typeof v !== 'object');
+  function fieldCellEditable(f, d, ctx) {
+    const v = d.fields[f.name];
+    const dd = h('dd', { class: 'editable' });
+    const show = () => dd.replaceChildren(fieldValue(f, v, ctx), fieldEditable(f, v)
+      ? h('button', { class: 'tbtn icon edit', type: 'button', title: `Edit ${humanize(f.name)}`, 'aria-label': `Edit ${humanize(f.name)}`, onclick: editNow }, icon('pencil')) : null);
+    function editNow() {
+      let input;
+      if (f.enum) input = h('select', { class: 'field' }, f.enum.map((o) => h('option', { value: String(o), selected: String(o) === String(v ?? '') || null }, String(o))));
+      else if (f.kind === 'bool') input = h('input', { type: 'checkbox', checked: v === true || null });
+      else if (f.kind === 'date') input = h('input', { class: 'field', type: 'date', value: v ? String(v).slice(0, 10) : '' });
+      else if (f.kind === 'number') input = h('input', { class: 'field', type: 'number', step: 'any', value: v ?? '' });
+      else {
+        const list = f.kind === 'ref' ? h('datalist', { id: uid() }, S.rows.map((r) => h('option', { value: r.id }, plain(r.title)))) : null;
+        input = h('input', { class: 'field', type: 'text', value: v ?? '', list: list ? list.id : null, autocomplete: 'off' });
+        if (list) dd.append(list);
+      }
+      input.setAttribute('aria-label', humanize(f.name));
+      const value = () => (f.kind === 'bool' ? input.checked : input.value.trim());
+      const save = () => {
+        const x = value();
+        if (x === '' || x === String(v ?? '')) return show();  // szsdlc has no "unset"; nothing changed
+        edit('set', d.id, { expect: d.hash, values: { [f.name]: x } }).then((out) => { if (!out && dd.isConnected) show(); });
+      };
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); save(); }
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); show(); }
+      });
+      dd.replaceChildren(input, h('button', { class: 'btn small', type: 'button', onclick: save }, 'OK'), h('button', { class: 'btn small', type: 'button', onclick: show }, 'Cancel'));
+      input.focus();
+    }
+    show();
+    return dd;
+  }
+  // szsdlc validate, as a window: what is wrong, where, and the fix.
+  function openFindings() {
+    const w = openWindow({ key: 'findings', title: `Findings - ${S.project.name}`, icon: 'warn', width: 780, height: 380, status: true });
+    w.redraw = () => {
+      const pid = S.pid;
+      w.body.replaceChildren(h('p', { class: 'muted pad' }, 'Validating…'));
+      S.api.findings().then((f) => {
+        if (S.pid !== pid || !f) return;
+        w.body.replaceChildren(listView({ sortKey: 'findings', rows: f.rows, empty: 'No findings: szsdlc validate is clean.',
+          ctx: (r) => itemCtx(S.byKey.get(normId(r.ref))),
+          columns: [
+            { key: 'level', label: 'Level', render: (r) => cell(r.level === 'error' ? 'error' : 'warn', r.level), width: '90px' },
+            { key: 'ref', label: 'Where', render: (r) => (S.byKey.has(normId(r.ref)) ? entLink(r.ref) : r.ref), width: '110px' },
+            { key: 'message', label: 'Finding', wrap: true }, { key: 'fix', label: 'Fix', wrap: true, get: (r) => r.fix || '' }],
+          onOpen: (r) => { if (S.byKey.has(normId(r.ref))) openItem(r.ref); } }));
+        w.setStatus([`${f.errors} error(s), ${f.warnings} warning(s)`, f.total > f.rows.length ? `showing ${f.rows.length} of ${f.total}` : `${f.total} finding(s)`]);
+      });
+    };
+    w.redraw();
+    return w;
+  }
+  addEventListener('beforeunload', (e) => {
+    if ([...UNSENT.values()].some((c) => c.unsent)) { e.preventDefault(); e.returnValue = ''; }
+  });
+
   // -------------------------------------------------------------- markdown
   function slugger() {
     const seen = new Map();
@@ -890,6 +1077,8 @@
       menu: [
         { label: 'File', items: () => [
           { label: 'New window', icon: 'newwin', action: () => openExplorer(cur) },
+          ...(canEdit() ? ['-', { label: unsentHere() ? 'Send changes' : 'Send changes (none unsent)', icon: 'unsent', action: sendChanges },
+            { label: 'Findings…', icon: 'warn', action: openFindings }] : []),
           '-', { head: 'Switch project' }, ...projectMenuItems(),
           '-', { label: 'Close', action: () => w.close() }] },
         { label: 'View', items: () => [
@@ -1219,7 +1408,9 @@
     const key = normId(row.id);
     const root = h('div', { class: 'item-page', 'data-item': row.id }, h('p', { class: 'muted pad' }, `Reading ${row.id}…`));
     const pid = S.pid;
-    S.api.entity(row.id).then((d) => {
+    // Right after an edit the server already sent the item as it is now.
+    const pre = S.prefetched.get(key);
+    (pre ? Promise.resolve(pre) : S.api.entity(row.id)).then((d) => {
       if (!root.isConnected || S.pid !== pid) return;
       if (!d) { root.replaceChildren(h('p', { class: 'bad pad' }, `Could not read ${row.id}.`)); return; }
       const ctx = { root: 'sdlc', path: d.path };
@@ -1251,10 +1442,10 @@
       chain.map((c) => [h('span', { class: 'muted' }, ' › '), entLink(c.id), h('span', { class: 'muted crumb-t' }, ' ' + plain(c.title))]),
       h('span', { class: 'muted' }, ' › '), h('b', null, row.id));
     const meta = h('div', { class: 'meta' },
-      d.status ? h('span', { class: 'pill' }, d.status) : null,
+      statusControl(d, t),
       d.progress ? miniProgress(d.progress) : null,
       d.placement ? h('button', { class: 'chip', type: 'button', title: `Position ${d.placement.position} on ${d.placement.roadmap}`, onclick: (e) => openRoadmap(e.currentTarget) }, icon('calendar'), ` ${humanize(d.placement.horizon)} #${d.placement.position}`) : null,
-      (d.tags || []).map((tg) => h('button', { class: 'chip', type: 'button', onclick: (e) => go('tag:' + tg, e.currentTarget) }, '#' + tg)));
+      tagChips(d));
     return h('header', { class: 'item-head' },
       icon(typeIcon(t), 32),
       h('div', { class: 'grow', style: { minWidth: 0 } }, crumbs,
@@ -1272,7 +1463,7 @@
       t.relations_out.includes(parentRel) || d.parent ? [h('dt', null, humanize(parentRel)), h('dd', null, d.parent ? entLink(d.parent) : h('span', { class: 'muted' }, '(none)'))] : null,
       t.flags.schedulable ? [h('dt', null, 'Roadmap'), h('dd', null, d.placement ? `${humanize(d.placement.horizon)} #${d.placement.position}` : h('span', { class: 'muted' }, 'Not scheduled'))] : null));
     const fields = t.fields.length ? h('fieldset', null, h('legend', null, 'Fields'),
-      h('dl', { class: 'kv' }, t.fields.map((f) => [h('dt', null, humanize(f.name)), h('dd', null, fieldValue(f, d.fields[f.name], ctx))]))) : null;
+      h('dl', { class: 'kv' }, t.fields.map((f) => [h('dt', null, humanize(f.name)), fieldCellEditable(f, d, ctx)]))) : null;
     const byKind = new Map();
     for (const r of d.relations) { const k = r.direction === 'out' ? `→ ${humanize(r.kind)}` : `← ${humanize(r.inverse || r.kind + ' (from)')}`; if (!byKind.has(k)) byKind.set(k, []); byKind.get(k).push(r.id); }
     const links = h('fieldset', null, h('legend', null, 'Connections'), byKind.size
@@ -1852,7 +2043,7 @@
   function openAbout() {
     const p = S.project;
     messageBox({ title: 'About szsdlc Viewer', kind: 'info', text: [
-      h('p', null, h('b', null, 'szsdlc-ui-win95'), ` ${META.version || ''}`, h('span', { class: 'muted' }, ' — read-only')),
+      h('p', null, h('b', null, 'szsdlc-ui-win95'), ` ${META.version || ''}`, h('span', { class: 'muted' }, canEdit() ? ' — editing through szsdlc' : ' — read-only')),
       h('dl', { class: 'kv', style: { margin: '8px 0' } },
         h('dt', null, 'Project:'), h('dd', null, `${p.name} (${S.pid}), one of ${PROJECTS.length} open`),
         h('dt', null, 'SDLC root:'), h('dd', null, p.sdlc_root),
@@ -1862,7 +2053,8 @@
         h('dt', null, 'Schema:'), h('dd', null, schemaFromConfig() ? `read by szsdlc ${S.schema.szsdlc_version || ''}` : 'inferred from the project’s files'),
         h('dt', null, 'Items:'), h('dd', null, `${S.rows.length} across ${S.schema.types.length} types`),
         SNAP ? [h('dt', null, 'Snapshot:'), h('dd', null, SNAP.generated_at)] : null),
-      h('p', { class: 'muted' }, 'Phase 2 adds editing through szsdlc’s own commands, so every gate and validation still applies.'),
+      h('p', { class: 'muted' }, canEdit() ? 'Every edit is one of szsdlc’s own operations, so every gate and validation still applies. Edits stay on this computer until File → Send changes.'
+        : SNAP ? 'A snapshot is read-only.' : 'This viewer was started with --read-only.'),
     ] });
   }
   function openWelcome() {
@@ -1919,9 +2111,18 @@
         { label: 'About szsdlc Viewer…', icon: 'help', action: openAbout },
         { label: 'Welcome…', icon: 'logo', action: openWelcome },
         '-',
-        { label: 'Shut down…', icon: 'power', action: () => messageBox({ title: 'Shut Down', kind: 'info', text: ['Nothing to save: this viewer is read-only.', SNAP ? 'You can close this tab.' : 'You can close this tab. Stop the local server with Ctrl+C.'] }) },
+        { label: 'Shut down…', icon: 'power', action: shutDown },
       ].filter(Boolean), { big: true, above: true, banner: h('div', { class: 'banner' }, h('b', null, 'szsdlc ', h('em', null, 'Viewer'))) });
     });
+  }
+  function shutDown() {
+    const unsent = PROJECTS.filter((p) => UNSENT.get(p.id)?.unsent).map((p) => p.name);
+    if (unsent.length) {
+      return messageBox({ title: 'Shut Down', kind: 'warn', text: [`Unsent changes in ${unsent.join(', ')}. They are kept here either way; send them to share them.`],
+        buttons: [{ label: 'Send changes', default: true, action: sendChanges }, { label: 'Not now' }] });
+    }
+    messageBox({ title: 'Shut Down', kind: 'info', text: [canEdit() ? 'Nothing unsent: every change has been sent.' : 'Nothing to save: this viewer is read-only.',
+      SNAP ? 'You can close this tab.' : 'You can close this tab. Stop the local server with Ctrl+C.'] });
   }
   function clock() {
     const el = document.getElementById('clock');
@@ -1932,6 +2133,30 @@
     const tray = document.getElementById('tray-schema');
     tray.replaceChildren(icon(schemaFromConfig() ? 'gear' : 'warn'));
     tray.title = schemaFromConfig() ? 'Schema read from szsdlc config' : 'Schema inferred from the store’s files (szsdlc not importable)';
+    // Unsent changes: an icon, and * in the page's title, while there are any.
+    const c = UNSENT.get(S.pid) || NOTHING_UNSENT;
+    const unsent = document.getElementById('tray-unsent');
+    unsent.hidden = !c.unsent;
+    const n = c.edits.length;
+    unsent.title = !c.unsent ? '' : n ? `${n} unsent change${n === 1 ? '' : 's'}${c.outside ? ', and others' : ''}. Click to list or send them.` : 'Unsent changes, made outside this viewer. Click to send them.';
+    unsent.setAttribute('aria-label', unsent.title || 'No unsent changes');
+    unsent.replaceChildren(icon('unsent'));
+    document.title = `${c.unsent ? '* ' : ''}${S.project.name} - szsdlc Viewer`;
+    // szsdlc validate's counts, as it would show them.
+    const f = S.findings;
+    const found = document.getElementById('tray-findings');
+    found.hidden = !f || !(f.errors || f.warnings);
+    if (f) {
+      found.title = `szsdlc validate: ${f.errors} error(s), ${f.warnings} warning(s). Click for the findings.`;
+      found.setAttribute('aria-label', found.title);
+      found.replaceChildren(icon(f.errors ? 'error' : 'warn'), h('span', null, String(f.errors || f.warnings)));
+    }
+  }
+  function buildTray() {
+    if (!canEdit()) return;
+    const unsent = document.getElementById('tray-unsent');
+    unsent.addEventListener('click', (e) => { e.stopPropagation(); if (openMenuEl?.anchor === unsent) closeMenus(); else popMenu(unsent, unsentMenu(), { above: true }); });
+    document.getElementById('tray-findings').addEventListener('click', (e) => { e.stopPropagation(); openFindings(); });
   }
 
   // -------------------------------------------------------------- projects
@@ -1961,8 +2186,12 @@
   async function loadProject(pid) {
     if (CTX.has(pid)) return CTX.get(pid);
     const api = apiFor(pid);
-    const [project, schema, rows, roadmaps, docs] = await Promise.all([api.project(), api.schema(), api.entities(), api.roadmaps(), api.docs()]);
-    const ctx = { pid, api, project, schema, rows, roadmaps, docs, byKey: new Map(), byPath: new Map(), types: new Map() };
+    const editing = canEdit();
+    const [project, schema, rows, roadmaps, docs, changes, findings] = await Promise.all([api.project(), api.schema(), api.entities(), api.roadmaps(), api.docs(),
+      editing ? api.changes().catch(() => NOTHING_UNSENT) : NOTHING_UNSENT, editing ? api.findings().catch(() => null) : null]);
+    const ctx = { pid, api, project, schema, rows, roadmaps, docs, byKey: new Map(), byPath: new Map(), types: new Map(),
+      findings: findings && { errors: findings.errors, warnings: findings.warnings }, prefetched: new Map() };
+    UNSENT.set(pid, changes);
     schema.types.forEach((t) => ctx.types.set(t.prefix, t));
     rows.forEach((r) => { ctx.byKey.set(normId(r.id), r); ctx.byPath.set(r.path, r); });
     // Indexes the tree, graph and roadmap read. Children follow the configured
@@ -1993,7 +2222,6 @@
       if (w.taskBtn) w.taskBtn.hidden = away;
     }
     if (WM.active && WM.active.pid !== null && WM.active.pid !== pid) { WM.active.el.classList.remove('active'); WM.active = null; }
-    document.title = `${S.project.name} - szsdlc Viewer`;
     const sw = document.getElementById('switcher');
     sw.replaceChildren(icon('computer'), h('span', null, S.project.name), h('span', { class: 'caret', 'aria-hidden': 'true' }, '▾'));
     sw.title = `Project: ${S.project.name} (${PROJECTS.length} open). Click to switch.`;
@@ -2078,7 +2306,7 @@
     try { result = await hub.refresh(pid, replace); } catch (err) {
       if (err.status === 409) {
         if (manual) {
-          messageBox({ kind: 'warn', title: 'Refresh', text: [String(err.message), 'Refresh anyway to take the latest, or cancel and send your changes first.'],
+          messageBox({ kind: 'warn', title: 'Refresh', text: [String(err.message), 'Refresh anyway to take the latest, or cancel and send them first (File → Send changes).'],
             buttons: [{ label: 'Refresh anyway', action: () => scheduler.manual({ replace: true }) }, { label: 'Cancel', default: true }] });
         } else {
           quietStatus('Not refreshed: this copy has unsent changes');
@@ -2198,6 +2426,7 @@
       messageBox({ kind: 'error', title: 'szsdlc Viewer', text: ['The viewer could not reach its local service.', String(err.message || err)] });
       return;
     }
+    buildTray();
     if (!PROJECTS.length) { openProjects(); return; }
     const want = parseHash();
     const remembered = store.get('project');

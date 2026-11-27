@@ -21,7 +21,7 @@ VENDOR = ("marked.umd.js", "purify.min.js")
 def snapshot(registry: Registry) -> dict:
     return {
         "generated_at": _dt.date.today().isoformat(),
-        "meta": meta(),
+        "meta": {**meta(), "readonly": True},  # a snapshot cannot be edited
         "projects": [registry.summary(pid, p, public=True) for pid, p in registry.projects.items()],
         "data": {pid: p.snapshot() for pid, p in registry.projects.items()},
     }
