@@ -158,3 +158,12 @@ def test_visible_text_speaks_the_glossary():
         strings = re.findall(r"'[^'\n]*'|\"[^\"\n]*\"|`[^`\n]*`", text)
         hits = [s for s in strings if retired.search(s)]
         assert not hits, f"{name}: {hits[:3]}"
+
+
+def test_the_text_editor_knows_nothing_of_what_it_edits():
+    """WI-0075: one editor for every text the viewer writes; the caller validates and saves."""
+    start = APP.index("function openTextEditor(")
+    end = APP.index("\n  }\n", start)
+    editor = APP[start:end]
+    for word in ("capture", "intake", "hub.", "S.schema", "S.pid"):
+        assert word not in editor, word

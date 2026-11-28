@@ -12,9 +12,10 @@ from fastapi import Depends, FastAPI, Request
 from .. import __version__
 from ..services import ServiceError, ViewerService
 from .asgi import Harden
-from .map_requests import body_schema, open_project_args, query, refresh_args, set_args, tag_args, write_guard
+from .map_requests import (body_schema, capture_args, open_project_args, query, refresh_args, set_args, tag_args,
+                           write_guard)
 from .map_responses import Refused, problem, refusal, send, send_json
-from .wire_model import (ChangesResponse, EditResponse, FindingsResponse, ListProjectsResponse, MetaResponse,
+from .wire_model import (CaptureRequest, ChangesResponse, EditResponse, FindingsResponse, ListProjectsResponse, MetaResponse,
                          OpenProjectRequest, OpenProjectResponse, RefreshRequest, RefreshResponse, SendResponse,
                          SetRequest, TagRequest)
 
@@ -129,6 +130,12 @@ def create_app(service: ViewerService, *, allowed_hosts: frozenset[str], token: 
         service.ensure_can_edit()
         service.known(pid)
         return send_json(service.tag(pid, ref, add=False, **tag_args(body)))
+
+    @app.post("/api/p/{pid}/capture", response_model=EditResponse, openapi_extra=body_schema(CaptureRequest))
+    def capture(pid: str, body: dict = Depends(write_body)):
+        service.ensure_can_edit()
+        service.known(pid)
+        return send_json(service.capture(pid, **capture_args(body)))
 
     @app.post("/api/p/{pid}/send", response_model=SendResponse)
     def send_changes(pid: str, body: dict = Depends(write_body)):

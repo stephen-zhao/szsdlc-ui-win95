@@ -81,6 +81,14 @@ class TagRequest(BaseModel):
     tags: list[StrictStr]
 
 
+class CaptureRequest(BaseModel):
+    """A thought for `szsdlc capture`: its first line is the summary."""
+    model_config = ConfigDict(extra="forbid")
+    text: StrictStr
+    #: The intake type's name, from the schema descriptor; needed when there are several.
+    type: StrictStr | None = None
+
+
 class Edit(BaseModel):
     """One change this viewer made since the last send."""
     at: str

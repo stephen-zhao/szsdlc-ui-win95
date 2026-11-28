@@ -87,6 +87,8 @@
     edit: (pid, ref, op, body) => post(P(pid) + 'entities/' + encodeURIComponent(ref) + '/' + op, body),
     // szsdlc sync, once: everything unsent, as one record.
     send: (pid) => post(P(pid) + 'send', {}),
+    // szsdlc capture: a thought into the intake type (named when there are several).
+    capture: (pid, text, type) => post(P(pid) + 'capture', { text, type: type || null }),
   };
   function apiFor(pid) {
     if (SNAP) {
@@ -502,6 +504,7 @@
           '-',
           ...(x && t.kids ? [{ label: x.isExpanded(t.path) ? 'Collapse' : 'Expand', action: () => x.toggleNode(t.path) }, '-'] : []),
           ...viewAsMenu(t.node, src),
+          ...(capturesInto(t.node) ? [{ label: `New ${captureNoun()}…`, icon: 'note', action: () => captureIdea(src, t.node) }] : []),
           { label: 'Copy link', action: () => copyPlain(linkTo(t.node), src) },
         ];
       }
@@ -554,6 +557,7 @@
         ];
       }
       case 'desktop': return [
+        ...(canCapture() ? [{ label: `New ${captureNoun()}…`, icon: 'note', action: () => captureIdea(src) }, '-'] : []),
         ...(SNAP ? [] : [{ label: 'Refresh', icon: 'refresh', action: () => refreshProject() }, '-']),
         { label: 'Display settings…', icon: 'gear', action: openDisplay },
       ];
@@ -830,6 +834,110 @@
   }
   addEventListener('beforeunload', (e) => {
     if ([...UNSENT.values()].some((c) => c.unsent)) { e.preventDefault(); e.returnValue = ''; }
+  });
+
+  // ------------------------------------------------------------ text editor
+  // One plain-text editor for every piece of text the viewer writes: capture
+  // now, new documents and body editing later. It knows nothing about what the
+  // text is for: the caller validates it (onValidate) and saves it (onSave, a
+  // promise). A refusal is shown inside the window and the text stays; a draft
+  // is kept per tab (sessionStorage), so a reload or a crash offers it back.
+  const drafts = {
+    get(key) { try { return sessionStorage.getItem('szv:draft:' + key); } catch { return null; } },
+    set(key, text) {
+      try { if (text) sessionStorage.setItem('szv:draft:' + key, text); else sessionStorage.removeItem('szv:draft:' + key); } catch { /* storage blocked: only the draft is lost */ }
+    },
+  };
+  function openTextEditor({ title, text = '', placeholder = '', header = null, onSave, onValidate = null, draftKey = null, icon: ic = 'note' }) {
+    const restored = draftKey ? drafts.get(draftKey) : null;
+    const w = openWindow({ title, icon: ic, width: 580, height: 400, status: true });
+    const msg = h('div', { class: 'editor-msg', role: 'alert', hidden: true });
+    const ta = h('textarea', { class: 'editor-text field', placeholder, spellcheck: 'true', 'aria-label': title });
+    ta.value = restored ?? text;
+    const bSave = h('button', { class: 'btn default', type: 'button', title: 'Save (Ctrl+Enter)', onclick: () => save() }, 'Save');
+    const bCancel = h('button', { class: 'btn', type: 'button', title: 'Cancel (Esc)', onclick: () => w.close() }, 'Cancel');
+    w.body.append(h('div', { class: 'editor' }, header, msg, ta, h('div', { class: 'row end' }, bSave, bCancel)));
+    const dirty = () => ta.value !== text;
+    function paint() {
+      const before = ta.value.slice(0, ta.selectionStart);
+      const line = before.split('\n').length, col = before.length - before.lastIndexOf('\n');
+      w.setStatus([`Ln ${line}, Col ${col}`, `${ta.value.length} character${ta.value.length === 1 ? '' : 's'}`, restored != null ? 'Draft restored' : '']);
+    }
+    function show(problem, fix) {
+      msg.replaceChildren(icon('error'), h('span', null, problem, fix ? h('span', { class: 'fix' }, ` Fix: ${fix}`) : null));
+      msg.hidden = false;
+    }
+    function busy(on) { [ta, bSave, bCancel, ...w.body.querySelectorAll('select, input')].forEach((x) => { x.disabled = on; }); }
+    const realClose = w.close;
+    const finish = () => { if (draftKey) drafts.set(draftKey, ''); realClose(); };
+    // Closing with text that would be lost asks first; the draft is cleared either way it ends.
+    w.close = () => {
+      if (!dirty()) return finish();
+      messageBox({ kind: 'warn', title, text: 'Discard this text?', buttons: [{ label: 'Discard', action: finish }, { label: 'Keep editing', default: true, action: () => ta.focus() }] });
+    };
+    async function save() {
+      if (bSave.disabled) return;
+      const value = ta.value;
+      const problem = onValidate ? onValidate(value) : null;
+      if (problem) { show(problem); ta.focus(); return; }
+      msg.hidden = true;
+      busy(true);
+      try { await onSave(value); finish(); } catch (err) { busy(false); show(String(err.message || err), err.fix); ta.focus(); }
+    }
+    ta.addEventListener('input', () => { if (draftKey) drafts.set(draftKey, dirty() ? ta.value : ''); paint(); });
+    ['keyup', 'click', 'select'].forEach((ev) => ta.addEventListener(ev, paint));
+    w.el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); save(); }
+      else if (e.key === 'Escape' && !openMenuEl) { e.preventDefault(); e.stopPropagation(); w.close(); }
+    });
+    paint();
+    ta.focus();
+    return w;
+  }
+
+  // ---------------------------------------------------------------- capture
+  // A thought into the type the schema marks intake, through szsdlc capture.
+  // Never a type found by name: with several intake types the editor asks which.
+  const intakeTypes = () => (S ? S.schema.types.filter((t) => t.flags.intake) : []);
+  const canCapture = () => canEdit() && intakeTypes().length > 0;
+  // What a capture makes, for labels: the intake type's own name when there is one.
+  const captureNoun = () => { const ts = intakeTypes(); return ts.length === 1 ? ts[0].label.toLowerCase() : 'thought'; };
+  function capturesInto(node) {
+    const [k, v] = splitNode(node);
+    return canCapture() && (k === 'inbox' || (k === 'type' && !!S.types.get(v)?.flags.intake));
+  }
+  function captureAction(node) {
+    return capturesInto(node) ? { label: 'New…', title: `Capture a new ${captureNoun()} (Alt+I)`, run: (el) => captureIdea(el, node) } : null;
+  }
+  function captureIdea(src, node = null) {
+    if (!canCapture()) return null;
+    const types = intakeTypes();
+    const pid = S.pid;
+    const [k, v] = node ? splitNode(node) : [null, null];
+    const from = winOf(src) || explorerFor(src);
+    let pick = null;
+    let header = null;
+    if (types.length > 1) {
+      pick = h('select', { class: 'field', id: uid() }, types.map((t) => h('option', { value: t.name, selected: (k === 'type' && t.prefix === v) || null }, t.label)));
+      header = h('label', { class: 'row', for: pick.id }, h('span', null, 'Type:'), pick);
+    }
+    return openTextEditor({
+      title: `New ${captureNoun()} - ${S.project.name}`, icon: 'note', header, draftKey: `${pid}:capture`,
+      placeholder: 'The first line is its summary; anything after it, the detail.',
+      onSave: async (text) => {
+        const out = await hub.capture(pid, text, pick ? pick.value : null);
+        const id = out.result.id;
+        await reloadProject(pid, `${id} captured`, out.entity);
+        if (from?.setStatus && S.pid === pid) from.setStatus([`${id} captured`]);
+      },
+    });
+  }
+  document.addEventListener('keydown', (e) => {
+    // Alt+I, anywhere outside a text field (Ctrl+Shift+I is the browser's).
+    if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === 'KeyI' && !keepBrowserMenu(e.target) && canCapture()) {
+      e.preventDefault();
+      captureIdea(document.activeElement);
+    }
   });
 
   // -------------------------------------------------------------- markdown
@@ -1305,7 +1413,7 @@
       }
       if (k === 'type') {
         const t = S.types.get(v), all = rowsOfType(v), rows = visible(all);
-        return { el: coll(all, { key: 'type:' + v, columns: typeColumns(t), defaultView: t.flags.actionable ? 'board' : 'details' }), status: `${rows.length} object(s)${hiddenNote(all.length, rows.length)}` };
+        return { el: coll(all, { key: 'type:' + v, columns: typeColumns(t), defaultView: t.flags.actionable ? 'board' : 'details', action: captureAction('type:' + v) }), status: `${rows.length} object(s)${hiddenNote(all.length, rows.length)}` };
       }
       if (k === 'tags') {
         const rows = [...S.tags.entries()].map(([tag, rs]) => ({ tag, count: rs.length, types: [...new Set(rs.map((r) => typeOf(r).plural))].join(', ') })).filter((r) => !q || r.tag.includes(q));
@@ -1319,7 +1427,7 @@
       if (k === 'inbox') {
         const types = S.schema.types.filter((t) => t.flags.intake);
         const all = S.rows.filter((r) => types.some((t) => t.prefix === r.type)), rows = visible(all);
-        return { el: coll(all, { key: 'inbox', columns: types.length === 1 ? typeColumns(types[0]) : null }), status: `${rows.length} captured thought(s)${hiddenNote(all.length, rows.length)}` };
+        return { el: coll(all, { key: 'inbox', columns: types.length === 1 ? typeColumns(types[0]) : null, action: captureAction('inbox') }), status: `${rows.length} captured thought(s)${hiddenNote(all.length, rows.length)}` };
       }
       if (k === 'roadmap') {
         // The roadmap is the schedulable items, viewed by default as a board grouped by horizon.
@@ -1869,7 +1977,7 @@
     return groupSpec(rows, 'status');
   }
 
-  function collectionView(rows, { key, host, columns = null, defaultView = 'details', defaultGroup = 'status' }) {
+  function collectionView(rows, { key, host, columns = null, defaultView = 'details', defaultGroup = 'status', action = null }) {
     const root = h('div', { class: 'collection' });
     let view = store.get('view:' + key) || defaultView;
     let group = store.get('group:' + key) || defaultGroup;
@@ -1882,6 +1990,8 @@
     function drawBar() {
       const selId = uid(), chkId = uid();
       bar.replaceChildren(...[
+        // An action that adds to this collection, such as New… where items are captured.
+        action ? [h('button', { class: 'tbtn new', type: 'button', title: action.title || null, onclick: (e) => action.run(e.currentTarget) }, icon(action.icon || 'note'), ' ' + action.label), h('span', { class: 'tsep' })] : null,
         h('span', { class: 'seg', role: 'group', 'aria-label': 'View' }, VIEWS.map(([v, label, ic]) =>
           h('button', { class: 'tbtn', type: 'button', 'aria-pressed': String(view === v), title: `${label} view`, onclick: () => { view = v; store.set('view:' + key, v); draw(); } }, icon(ic), ' ' + label))),
         view === 'board' ? [h('label', { for: selId }, 'Group by'), h('select', { class: 'field sel', id: selId, onchange: (e) => { group = e.target.value; store.set('group:' + key, group); draw(); } },
@@ -2099,6 +2209,7 @@
       if (openMenuEl?.anchor === start) return closeMenus();
       popMenu(start, [
         { label: 'Projects…', icon: 'network', action: openProjects },
+        canCapture() ? { label: `Capture ${captureNoun()}…`, icon: 'note', title: 'Alt+I', action: () => captureIdea(null) } : null,
         '-',
         ...S.schema.types.map((t) => ({ label: t.plural, icon: typeIcon(t), action: () => openExplorer('type:' + t.prefix) })),
         '-',
@@ -2240,6 +2351,7 @@
       ...PROJECTS.map((p) => ({ label: `${p.id === S?.pid ? '● ' : ' '}${p.name}`, icon: 'computer', title: p.sdlc_root, action: () => switchProject(p.id) })),
       SNAP ? null : { label: 'Open project…', icon: ['folder'], action: openProjectDialog },
       SNAP || !S ? null : { label: `Refresh ${S.project.name} (F5)`, action: () => refreshProject() },
+      canCapture() ? { label: `Capture ${captureNoun()}… (Alt+I)`, icon: 'note', action: () => captureIdea(null) } : null,
     ].filter(Boolean);
   }
 

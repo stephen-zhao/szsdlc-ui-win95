@@ -66,6 +66,12 @@ def describe_tags(op: str, tags: list[str]) -> str:
     return " ".join([op, *(sign + t for t in tags)])
 
 
+def describe_capture(text: str, width: int = 60) -> str:
+    """A capture in words: `captured: <its first line>`, clipped."""
+    first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+    return "captured: " + (first if len(first) <= width else first[: width - 1] + "…")
+
+
 def _plain(value: Any) -> str:
     return "(not set)" if value in (None, "") else str(value)
 
@@ -97,6 +103,15 @@ class Edits:
     def _tags(self, op: str, ref: str, tags: list[str], expect: str) -> Any:
         result = self._mutate(op, {"ref": ref, "tags": list(tags), "expect": expect})
         self._record(result.id, op, describe_tags(op, list(tags)))
+        return result
+
+    def capture(self, text: str, type_name: str | None = None) -> Any:
+        """`szsdlc capture`: a thought into the intake type (named when there are several).
+
+        No `expect`: nothing exists yet that could have changed since it was read.
+        """
+        result = self._mutate("capture", {"text": text, "type": type_name})
+        self._record(result.id, "capture", describe_capture(text))
         return result
 
     def _mutate(self, op: str, params: dict) -> Any:

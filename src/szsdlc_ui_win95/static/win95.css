@@ -463,3 +463,11 @@ dd.editable .field { min-width: 0; max-width: 220px; }
 .tray-btn { border: 0; background: none; padding: 0; display: inline-flex; align-items: center; gap: 2px; cursor: pointer; font: inherit; color: inherit; }
 .tray-btn[hidden] { display: none; }
 .tray-btn:focus-visible { outline: 1px dotted currentColor; }
+
+/* ---- the plain-text editor (WI-0075): Notepad-like, shared by every text the viewer writes ---- */
+.editor { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.editor-text { flex: 1; min-height: 120px; resize: none; font: 13px/1.4 ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.editor-msg { display: flex; gap: 6px; align-items: flex-start; padding: 4px 6px; background: var(--face-hi, #ffffe1); box-shadow: var(--thin-in); }
+.editor-msg[hidden] { display: none; }
+.editor-msg .fix { color: var(--ink-dim); }
+.viewbar .tbtn.new { font-weight: bold; }
