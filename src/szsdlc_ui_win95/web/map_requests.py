@@ -18,7 +18,7 @@ from fastapi import Request
 from pydantic import BaseModel, ValidationError
 
 from .map_responses import Refused, problem
-from .wire_model import OpenProjectRequest, RefreshRequest, SetRequest, TagRequest
+from .wire_model import CaptureRequest, OpenProjectRequest, RefreshRequest, SetRequest, TagRequest
 
 MAX_BODY = 65536
 
@@ -96,3 +96,9 @@ def tag_args(body: dict) -> dict:
     """A Tag or Untag body as the service's keyword arguments."""
     asked = validated(TagRequest, body)
     return {"tags": list(asked.tags), "expect": asked.expect}
+
+
+def capture_args(body: dict) -> dict:
+    """A Capture body as the service's keyword arguments."""
+    asked = validated(CaptureRequest, body)
+    return {"text": asked.text, "type_name": asked.type}

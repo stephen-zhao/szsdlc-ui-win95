@@ -280,3 +280,68 @@ def test_the_api_description_names_the_edit_routes(served):
                  "/api/p/{pid}/entities/{ref}/untag", "/api/p/{pid}/send", "/api/p/{pid}/changes",
                  "/api/p/{pid}/findings"):
         assert path in paths, path
+
+
+# -- capture (WI-0075) ------------------------------------------------------------
+def test_capture_makes_an_idea_and_logs_it(project):
+    svc = service_for(project)
+    out = svc.capture("proj", "Dark mode for the board\nWith a toggle in the toolbar.")
+    new = out["result"]["id"]
+    assert out["entity"]["id"] == new and svc.entity("proj", new)["body"].startswith("Dark mode")
+    assert out["changes"] == {"unsent": False, "edits": [], "outside": False}  # a folder project sends nothing
+    log = registry_project(svc).edits.log()
+    assert [(e.op, e.summary) for e in log] == [("capture", "captured: Dark mode for the board")]
+
+
+def registry_project(svc):
+    return svc.registry.get("proj")
+
+
+def test_an_empty_capture_is_szsdlcs_refusal(project):
+    svc = service_for(project)
+    with pytest.raises(Invalid) as refused:
+        svc.capture("proj", "   \n  ")
+    assert refused.value.refusal["class"] == "bad_input" and "nothing to capture" in refused.value.detail
+
+
+def test_two_intake_types_need_a_type(project):
+    config = project / ".szsdlc" / "config.yml"
+    config.write_text(config.read_text(encoding="utf-8") + "entity_types: {spike: {intake: true}}\n",
+                      encoding="utf-8")
+    svc = service_for(project)
+    with pytest.raises(Invalid) as refused:
+        svc.capture("proj", "which one?")
+    assert "--type is required" in refused.value.detail
+    out = svc.capture("proj", "a spike thought", type_name="spike")
+    assert out["entity"]["type"] == "SPK"
+
+
+def test_capture_is_refused_read_only(project):
+    with pytest.raises(Forbidden):
+        service_for(project, read_only=True).capture("proj", "nope")
+
+
+@pytest.mark.skipif(shutil.which("git") is None, reason="git is not installed")
+def test_a_capture_to_a_clone_is_unsent_until_sent(remote):  # noqa: F811
+    registry = Registry()
+    pid = registry.add(remote.as_uri())
+    svc = ViewerService(registry)
+    out = svc.capture(pid, "Captured in the viewer")
+    assert out["changes"]["unsent"] and out["changes"]["edits"][0]["summary"] == "captured: Captured in the viewer"
+    assert svc.send(pid)["sent"] is True
+
+
+def test_the_capture_route_keeps_the_guards_and_maps_refusals(served):
+    auth = {"X-Viewer-Token": token(served)}
+    path = "/api/p/proj/capture"
+    assert call(served, "POST", path, {"text": "x"})[0] == 403  # no launch token
+    assert call(served, "POST", path, {"text": "x"}, {**auth, "Origin": "http://evil.example"})[0] == 403
+    assert call(served, "POST", path, b"x" * 70000, auth)[0] == 413
+    assert call(served, "POST", "/api/p/nope/capture", {"text": "x"}, auth)[0] == 404
+    assert call(served, "POST", path, b"not json", auth)[0] == 400
+    assert call(served, "POST", path, {}, auth)[0] == 400  # text is required
+    status, _, body = call(served, "POST", path, {"text": "  "}, auth)
+    assert status == 400 and body["refusal"]["class"] == "bad_input"
+    status, _, body = call(served, "POST", path, {"text": "Served idea"}, auth)
+    assert status == 200 and body["entity"]["id"] == body["result"]["id"]
+    assert "/api/p/{pid}/capture" in call(served, "GET", "/api/openapi.json")[2]["paths"]

@@ -8,6 +8,7 @@ const { chromium } = require('playwright');
   const page = await browser.newPage({ viewport: { width: 1366, height: 860 } });
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  page.on('dialog', (d) => d.accept());  // the beforeunload prompt for unsent changes
   // A refusal is a 4xx the page handles; only other console errors count.
   page.on('console', (m) => m.type() === 'error' && !/status of (409|422|400)/.test(m.text()) && errors.push(m.text()));
   await page.addInitScript(() => { try { localStorage.setItem('szv:welcome', '0'); localStorage.setItem('szv:autoRefresh', '0'); } catch { /* ignore */ } });
@@ -85,6 +86,53 @@ const { chromium } = require('playwright');
     await page.fill('.window.dialog textarea', 'replanned from scratch');
     await page.click('.window.dialog button:has-text("Move")');
     await pillIs('idea');
+  });
+  await step('Alt+I captures an idea; an empty one is refused inside the editor', async () => {
+    await page.evaluate(() => document.activeElement?.blur());  // not in a text field
+    await page.keyboard.press('Alt+KeyI');
+    const editor = '.window.active:has(.editor-text)';
+    await page.waitForSelector(`${editor} .editor-text`);
+    await page.click(`${editor} button:has-text("Save")`);
+    await page.waitForSelector(`${editor} .editor-msg:has-text("nothing to capture")`);  // szsdlc's own refusal, in the window
+    await page.fill(`${editor} .editor-text`, 'Captured in the smoke test\nWith a second line.');
+    await page.keyboard.press('Control+Enter');
+    await page.waitForSelector('.editor-text', { state: 'detached' });
+    await page.waitForSelector('.statusbar:has-text("captured")');
+    await page.click('#tray-unsent');  // it is one of the unsent changes
+    await page.waitForSelector('.menu button[data-label$="captured: Captured in the smoke test"]');
+    await page.keyboard.press('Escape');
+  });
+  await step('a draft survives a reload, and closing asks before discarding it', async () => {
+    await page.click('#start');
+    await page.click('.menu button[data-label^="Capture idea"]');
+    await page.fill('.window.active .editor-text', 'half a thought');
+    await page.reload();  // the unsent capture's beforeunload prompt is accepted below
+    await page.waitForSelector('.window.active .toolbar');
+    await page.evaluate(() => document.activeElement?.blur());  // not in a text field
+    await page.keyboard.press('Alt+KeyI');
+    await page.waitForSelector('.window.active .editor-text');
+    if ((await page.inputValue('.window.active .editor-text')) !== 'half a thought') throw new Error('the draft was not offered back');
+    await page.waitForSelector('.window.active .statusbar:has-text("Draft restored")');
+    await page.click('.window.active:has(.editor-text) button:has-text("Cancel")');
+    await page.waitForSelector('.window.dialog:has-text("Discard this text?")');
+    await page.click('.window.dialog button:has-text("Discard")');
+    await page.waitForSelector('.editor-text', { state: 'detached' });
+    await page.evaluate(() => document.activeElement?.blur());  // not in a text field
+    await page.keyboard.press('Alt+KeyI');
+    if ((await page.inputValue('.window.active .editor-text')) !== '') throw new Error('a discarded draft came back');
+    await page.click('.window.active:has(.editor-text) button:has-text("Cancel")');  // nothing typed: closes at once
+    await page.waitForSelector('.editor-text', { state: 'detached' });
+  });
+  await step('New… on the Inbox toolbar captures into it, and Send changes sends it', async () => {
+    await page.evaluate((p) => { location.hash = `#${p}--inbox`; }, pid);
+    await page.click(`${W} .viewbar .tbtn.new`);
+    await page.fill('.window.active .editor-text', 'From the Inbox toolbar');
+    await page.click('.window.active:has(.editor-text) button:has-text("Save")');
+    await page.waitForSelector('.editor-text', { state: 'detached' });
+    await page.waitForSelector(`${W} .lv td:has-text("From the Inbox toolbar")`);
+    await page.click('#tray-unsent');
+    await page.click('.menu button[data-label="Send changes"]');
+    await page.waitForSelector('#tray-unsent', { state: 'hidden' });
   });
   await step('findings open from the File menu', async () => {
     await page.click(`${W} .menubar button:has-text("File")`);

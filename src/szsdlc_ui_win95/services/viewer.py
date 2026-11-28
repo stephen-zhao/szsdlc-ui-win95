@@ -158,6 +158,12 @@ class ViewerService:
         result = _through_szsdlc(lambda: write(ref, cleaned, expect=expect))
         return self._after_edit(project, result)
 
+    def capture(self, pid: str, text: str, *, type_name: str | None = None) -> dict:
+        """Capture a thought into an intake type through `szsdlc capture`; szsdlc refuses an empty one."""
+        project = self._editable(pid)
+        result = _through_szsdlc(lambda: project.edits.capture(text, type_name))
+        return self._after_edit(project, result)
+
     def send(self, pid: str) -> dict:
         """Send unsent changes, once, through `szsdlc sync`: one record for all of them."""
         project = self._editable(pid)

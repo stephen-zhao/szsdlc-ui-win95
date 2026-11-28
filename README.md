@@ -75,6 +75,13 @@ writes to a project.
 - **Fields:** the pencil beside a declared field opens an editor of its kind:
   a date, a number, a choice, yes/no or text. A list or nested value is
   edited by hand.
+- **Capture:** Alt+I, **New…** on the Inbox toolbar (and on an intake type's
+  folder), Capture… in the Start menu and the taskbar's project menu, or
+  New… on the right-click menu of those folders and the desktop. Each opens a
+  plain-text editor: the first line is the summary, the rest its detail. It
+  captures into the type the project marks `intake` (asking which when there
+  are several), keeps a draft per tab across a reload, and asks before
+  discarding text.
 
 Every edit is one of szsdlc's own operations, so a gate refuses exactly as the
 CLI would, with its remedy, and nothing is written. Each edit names the version

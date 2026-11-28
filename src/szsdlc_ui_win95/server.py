@@ -20,6 +20,7 @@ Routes (every project route is scoped by project id):
     GET  /api/p/<id>/findings            szsdlc validate, as data
     POST /api/p/<id>/entities/<ref>/set  {expect, values, force?, reason?}  szsdlc set
     POST /api/p/<id>/entities/<ref>/tag  {expect, tags}  szsdlc tag (and /untag)
+    POST /api/p/<id>/capture  {text, type?}  szsdlc capture: a thought into an intake type
     POST /api/p/<id>/send                szsdlc sync, once: send unsent changes
     GET  /api/openapi.json               the API, described
 
