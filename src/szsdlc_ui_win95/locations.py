@@ -2,8 +2,10 @@
 
 A **location** is whatever identifies a project: a folder on this computer, or a
 place a szsdlc backend can keep one, such as a git URL. People type one into
-Open project, or name one on the command line; which backend serves it is an
-implementation detail worked out here.
+Open project, or name one on the command line. Which backend serves it is not
+the viewer's to know: szsdlc's backends interpret locations themselves
+(`szsdlc.backend.from_location`, WI-0071), so this module parses no URL and
+names no backend type.
 
 Everything goes through szsdlc's own backend machinery, so cloning, the git
 protocol allowlist, credential redaction and the store registry behave exactly
@@ -12,8 +14,8 @@ as they do for the CLI:
 - a **folder** resolves as the CLI resolves it (the project sdlc store it is
   inside, or the backend its settings select), then `ensure` materializes the
   project sdlc store dir if it is not the folder itself;
-- a **repository location** becomes the settings its backend already reads, and
-  goes through `backend_class(type).from_settings` and `ensure`.
+- **anywhere else** is offered to szsdlc's backends; the one that claims it
+  builds itself from its own settings, and `ensure` materializes it.
 
 The viewer creates a project sdlc store dir only here, only when a person
 opens a project, and only through the backend's own `ensure`. Viewing never
@@ -26,40 +28,14 @@ viewer runs on either without deprecation warnings.
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from pathlib import Path
 
 from szsdlc import backend as sz_backend
 from szsdlc import config as sz_config
 from szsdlc import errors as sz_errors
-from szsdlc.settings import Setting
 
 from .errors import ProjectError
-
-SOURCE = "szsdlc-ui-win95 (Open project)"
-
-#: A git remote: a URL in a transport git may use, or scp-like `user@host:path`.
-#: `ext::` and other `helper::` forms are deliberately not matched (szsdlc
-#: refuses them too).
-GIT_REMOTE = re.compile(r"^(?:(?:https?|ssh|git|file)://\S+|[\w.+-]+@[\w.-]+:[^\s:]\S*)$", re.IGNORECASE)
-USERINFO = re.compile(r"(://)[^/@\s]+@")
-#: szsdlc names a project sdlc store dir it keeps itself `<name>-<10 hex digits>` (readable_name).
-STORE_SUFFIX = re.compile(r"-[0-9a-f]{10}$")
-
-
-def _git(text: str) -> dict[str, str] | None:
-    """`URL[#branch]` as git backend settings."""
-    url, _, branch = text.partition("#")
-    if not GIT_REMOTE.match(url):
-        return None
-    return {"URL": url, **({"BRANCH": branch} if branch else {})}
-
-
-#: How each backend reads a location, tried in order. Interpreting a location is
-#: the one backend-specific step szsdlc does not offer yet; when its backends
-#: can say for themselves, this table goes.
-INTERPRETERS = (("git", _git),)
 
 
 @dataclass(frozen=True)
@@ -73,21 +49,27 @@ class Resolved:
 
 
 def is_remote(text: str) -> bool:
-    """True when `text` names a place a backend keeps a project, not a folder here."""
+    """True when `text` names a place a backend keeps a project, not a folder here.
+
+    A location szsdlc refuses (a git remote helper such as `ext::`) is not one.
+    """
     text = str(text).strip()
-    if Path(text).expanduser().is_dir():
+    if sz_backend.is_folder(text):
         return False
-    return any(interpret(text) is not None for _, interpret in INTERPRETERS)
+    try:
+        return sz_backend.from_location(text) is not None
+    except sz_errors.SzsdlcError:
+        return False
 
 
 def display(location: str) -> str:
-    """A location fit to show: credentials and query strings removed."""
-    return USERINFO.sub(r"\1***@", str(location)).split("?", 1)[0]
+    """A location fit to show, with credentials and query strings masked, as szsdlc shows it."""
+    return sz_backend.redact(str(location))
 
 
 def store_name(store: Path) -> str:
     """A readable name for a project sdlc store dir szsdlc made, without its hash."""
-    return STORE_SUFFIX.sub("", store.name) or store.name
+    return sz_backend.project_sdlc_store_dir_name(Path(store))
 
 
 def resolve(location) -> Resolved:
@@ -95,13 +77,16 @@ def resolve(location) -> Resolved:
     text = str(location).strip()
     if not text:
         raise ProjectError("No location given. Name a folder on this computer, or a repository URL.")
-    if not is_remote(text):
+    if sz_backend.is_folder(text):
         return _folder(text)
-    for type_name, interpret in INTERPRETERS:
-        found = interpret(text)
-        if found is not None:
-            return _kept_elsewhere(text, type_name, found)
-    raise ProjectError(f"No szsdlc backend can open {display(text)}.")  # pragma: no cover - is_remote said one could
+    try:
+        backend = sz_backend.from_location(text)
+    except sz_errors.SzsdlcError as err:
+        raise ProjectError(f"{display(text)} is not a folder on this computer, nor a location szsdlc "
+                           f"can open: {err.problem}") from None
+    if backend is None:
+        return _folder(text)  # neither: the folder path says so
+    return _kept_elsewhere(text, backend)
 
 
 def _folder(text: str) -> Resolved:
@@ -121,13 +106,8 @@ def _folder(text: str) -> Resolved:
     return Resolved(backend, Path(root).resolve(), start, text)
 
 
-def _kept_elsewhere(text: str, type_name: str, found: dict[str, str]) -> Resolved:
-    prefix = sz_backend.key_prefix(type_name)
-    settings = {key: Setting(prefix + key, value, SOURCE, Path.home()) for key, value in found.items()}
-    hint = re.sub(r"\.git$", "", found.get("URL", text).rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1]) or "project"
+def _kept_elsewhere(text: str, backend) -> Resolved:
     try:
-        cls = sz_backend.backend_class(type_name)
-        backend = cls.from_settings(settings, sz_backend.Context(hint, sz_backend.home(), None))
         sz_backend.ensure(backend)
     except sz_errors.SzsdlcError as err:
         raise ProjectError(str(err)) from None

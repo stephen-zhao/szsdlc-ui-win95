@@ -50,8 +50,9 @@ and capture rather than discuss and forget.
    **unsent changes**. Not "store" on its own, "code root", "in tree" or
    "where the project is kept"; older spellings are accepted on input only.
 6. **The backend is an implementation detail.** No UI names a backend or asks
-   for one. Interpreting a location is the one backend-specific step, and it
-   lives only in `locations.INTERPRETERS`.
+   for one, and no code here interprets a location: szsdlc's backends do
+   (`szsdlc.backend.from_location`), so `locations.py` parses no URL, names no
+   backend type and redacts nothing itself. A test holds that.
 4. **The look is a skin; the UX decides.** Windows 95 chrome (title bars,
    raised frames) is for windows. Inside a window, use plain dividers and the
    window face.
